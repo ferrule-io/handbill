@@ -44,9 +44,19 @@ some access control, without the publisher keeping anything running.
 
 ## Decisions
 
-- **Access control**: token/URL-based to start. Viewers are link holders —
-  possessing the artifact's tokenized URL grants view access. No viewer
-  accounts or RBAC yet.
+- **Access control**: user accounts with per-site RBAC. Sharing means granting
+  another user a role on a site. (Supersedes the earlier token/URL-only model.)
+- **Accounts**: identified by email. No passwords — sign-in is passkey or SSO.
+  Google is the only SSO provider to start.
+- **Sign-up**: zero barrier to entry — a viewer opening a shared link should be
+  able to create an account and see the site in one or two steps.
+- **Account recovery**: recovery codes are generated and shown once at sign-up.
+- **Notifications**: SMTP is optional and configurable; when set, the server
+  sends notification emails. Everything must work without it.
+- **Sites**: each account can own and manage several sites, created and
+  updated through the MCP endpoint.
+- **Roles**: per-site roles include at least owner, manager (can publish and
+  update the site), and viewer.
 - **Lifecycle**: sites are updatable in place; an update keeps the same URL so
   viewers (e.g. a daily dashboard) see the new content. No expiration for now.
 - **Publishing interface**: the server exposes an MCP endpoint at `/mcp`.
@@ -55,7 +65,10 @@ some access control, without the publisher keeping anything running.
 
 ## Open questions
 
-- How publishers authenticate to `/mcp` (API key, bearer token, OAuth)?
+- How MCP clients authenticate to `/mcp` as a user (OAuth flow, personal
+  access tokens, or both)?
+- URL structure for the app, `/mcp`, and hosted site content.
 - Do updates retain previous versions, or overwrite?
 - Are other publish interfaces (HTTP API, CLI) needed besides MCP?
-- Token revocation/rotation for a shared URL.
+- Who may sign up and create sites on an instance (open, invite-only, allowlist)?
+- Exact permissions of manager vs owner (e.g. can managers add managers?).
