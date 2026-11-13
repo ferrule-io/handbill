@@ -84,7 +84,7 @@ If you manage routing outside the chart (e.g. using Gateway API, custom Ingress,
 
 ### 1. Bundled PostgreSQL (`postgresql.enabled=true`)
 
-By default, the chart deploys a single-instance PostgreSQL StatefulSet using the official `postgres:16-alpine` image (not Bitnami) with a dedicated PersistentVolumeClaim.
+By default, the chart deploys a single-instance PostgreSQL StatefulSet using the official Debian-based `postgres:17` image (runs as UID/GID 999, not Bitnami) with a dedicated PersistentVolumeClaim. If you switch to an Alpine variant (e.g. `postgres:alpine`), update `postgresql.podSecurityContext.fsGroup` and `postgresql.securityContext.runAsUser`/`runAsGroup` to `70` because Postgres runs as UID/GID 70 on Alpine.
 
 - The database password is automatically generated on initial install and preserved across upgrades via Helm `lookup`.
 - Alternatively, bring your own password secret via `postgresql.auth.existingSecret` and `postgresql.auth.existingSecretPasswordKey`.
@@ -291,7 +291,7 @@ The chart applies Kubernetes security best practices out-of-the-box:
 | `secretKey.existingSecretKey` | Key within `secretKey.existingSecret` | `secret-key` |
 | `postgresql.enabled` | Deploy bundled PostgreSQL StatefulSet | `true` |
 | `postgresql.image.repository` | Official postgres image repository | `postgres` |
-| `postgresql.image.tag` | PostgreSQL image tag | `16-alpine` |
+| `postgresql.image.tag` | PostgreSQL image tag | `17` |
 | `postgresql.auth.database` | Database name | `agent_dash` |
 | `postgresql.auth.username` | Database user | `agent_dash` |
 | `postgresql.auth.existingSecret` | Secret with existing PostgreSQL password | `""` |

@@ -12,6 +12,9 @@
       "type": "integer",
       "minimum": 1
     },
+    "strategy": {
+      "type": "object"
+    },
     "image": {
       "type": "object",
       "properties": {

@@ -6,6 +6,11 @@
 # NOTE: If replicaCount > 1 and storage.type is "local", persistence.accessModes
 # must include ReadWriteMany (RWX), or use s3 / gcs storage.
 replicaCount: 1
+# Deployment update strategy.
+# When unset and storage.type is "local" with ReadWriteOnce access mode, defaults to {type: Recreate}
+# to prevent RollingUpdate deadlocks on non-RWX volumes. Otherwise defaults to Kubernetes RollingUpdate.
+strategy: {}
+
 
 image:
   # Container image repository (no invented registry)
@@ -22,7 +27,8 @@ serviceAccount:
   # Specifies whether a service account should be created
   create: true
   # Automatically mount a ServiceAccount's API credentials?
-  automount: true
+  # Defaults to false: the app never talks to the Kubernetes API, and IRSA / GKE Workload Identity do not need the default token mount.
+  automount: false
   # Annotations to add to the service account (e.g. for AWS IRSA or GCP Workload Identity)
   annotations: {}
   # The name of the service account to use.
@@ -74,7 +80,10 @@ postgresql:
   enabled: true
   image:
     repository: postgres
-    tag: "16-alpine"
+    # Default uses the official Debian-based postgres:17 image which runs as UID/GID 999.
+    # NOTE: The alpine variant (e.g. postgres:alpine) runs as UID/GID 70, so if using alpine,
+    # update podSecurityContext.fsGroup and securityContext.runAsUser/runAsGroup to 70.
+    tag: "17"
     pullPolicy: IfNotPresent
   auth:
     database: agent_dash
