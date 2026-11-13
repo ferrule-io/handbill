@@ -65,11 +65,13 @@ the site to member-only.
 Site hosts are same-site with the app (`*.example.com`), so `SameSite` cookies
 do not stop an artifact from sending credentialed requests to the app. Required:
 
-- Every state-changing app request (including `/oauth/authorize` consent)
-  checks `Origin` exactly equals `APP_ORIGIN` and validates a CSRF token.
+- Every state-changing request authenticated by the session cookie (including
+  `/oauth/authorize` consent) checks `Origin` exactly equals `APP_ORIGIN` and
+  validates a CSRF token.
 - App cookies use the `__Host-` prefix so site hosts cannot set or overwrite them.
-- `/mcp` and `/oauth/token` authenticate by bearer token / client credentials
-  only and never accept the session cookie.
+- Non-cookie endpoints are exempt from the Origin/CSRF check and never accept
+  the session cookie: `/mcp` (bearer token), `/oauth/token` (PKCE/client
+  authentication), and `/api/deployments/<id>/archive` (signed short-lived URL).
 - No CORS response ever allows a site origin; credentialed CORS is limited to
   `APP_ORIGIN`.
 - Site responses send `X-Content-Type-Options: nosniff`, no CORS headers, and
