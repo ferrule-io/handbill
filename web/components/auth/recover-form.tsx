@@ -7,10 +7,12 @@ import { useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { addPasskey } from "@/components/auth/ceremonies"
-import { AuthFooterLink, AuthHeading, FormError, PasskeyNote, Spinner } from "@/components/auth/parts"
+import { AuthFooterLink, AuthHeading, PasskeyNote } from "@/components/auth/parts"
 import { Button } from "@/components/ui/button"
+import { FormError } from "@/components/ui/form-error"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage, refreshMe, safeReturn, useMe } from "@/lib/api"
 
 /**
@@ -127,7 +129,7 @@ export function RecoverForm() {
         </div>
         <Button type="submit" variant="brand" size="xl" disabled={busy}>
           {busy && <Spinner data-icon="inline-start" />}
-          Continue
+          {busy ? "Checking your code…" : "Continue"}
         </Button>
         <FormError>{error}</FormError>
       </form>

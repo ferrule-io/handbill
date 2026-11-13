@@ -1,25 +1,16 @@
 "use client"
 
-import { GlobeIcon, GlobeLockIcon, RefreshCwIcon, RotateCwIcon } from "lucide-react"
+import { GlobeIcon, GlobeLockIcon, RotateCwIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { EmptyState } from "@/components/layout/empty-state"
+import { LoadError } from "@/components/layout/empty-state"
 import { absoluteTime, can, relativeTime, useApi, type Site } from "@/components/site/data"
 import { IssuedLink } from "@/components/site/members-link"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -34,40 +25,35 @@ type Op = "enable" | "disable" | "rotate"
 export function PublicLink({ site }: { site: Site }) {
   const [load, reload] = useApi<State>(`/app-api/sites/${site.id}/public-link`)
   const [issued, setIssued] = useState<{ link: string; rotated: boolean } | null>(null)
-  const [busy, setBusy] = useState<Op | null>(null)
+  const [enabling, setEnabling] = useState(false)
   const owner = can.managePublicLink(site.role)
 
   async function run(op: Op) {
-    setBusy(op)
+    const res = await api<{ enabled: boolean; link: string | null }>(`/app-api/sites/${site.id}/public-link`, {
+      method: "POST",
+      body: { op },
+    })
+    setIssued(res.link ? { link: res.link, rotated: op === "rotate" } : null)
+    if (op === "disable") toast.success("Public link turned off")
+    reload()
+  }
+
+  async function enable() {
+    setEnabling(true)
     try {
-      const res = await api<{ enabled: boolean; link: string | null }>(`/app-api/sites/${site.id}/public-link`, {
-        method: "POST",
-        body: { op },
-      })
-      setIssued(res.link ? { link: res.link, rotated: op === "rotate" } : null)
-      if (op === "disable") toast.success("Public link turned off")
-      reload()
+      await run("enable")
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
-      setBusy(null)
+      setEnabling(false)
     }
   }
 
-  if (load.state === "loading") return <Skeleton className="h-32 w-full rounded-2xl" />
+  if (load.state === "loading") {
+    return <Skeleton className="h-[5.75rem] w-full rounded-2xl" aria-busy="true" aria-label="Loading the public link" />
+  }
   if (load.state === "error") {
-    return (
-      <EmptyState
-        title="Couldn’t load the public link"
-        actions={
-          <Button variant="outline" onClick={reload}>
-            <RefreshCwIcon /> Try again
-          </Button>
-        }
-      >
-        <p>{load.error.message}</p>
-      </EmptyState>
-    )
+    return <LoadError title="Couldn’t load the public link" message={load.error.message} onRetry={reload} />
   }
   const { enabled, updatedAt } = load.data
 
@@ -76,9 +62,10 @@ export function PublicLink({ site }: { site: Site }) {
       <div className="flex flex-col gap-4 rounded-2xl bg-card p-5 shadow-press ring-1 ring-border sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div
+            aria-hidden="true"
             className={cn(
               "grid size-11 shrink-0 place-items-center rounded-xl ring-1 [&_svg]:size-5",
-              enabled ? "bg-brand-soft text-brand ring-brand/25" : "bg-muted text-muted-foreground ring-border"
+              enabled ? "bg-brand-soft text-brand-strong ring-brand/25" : "bg-muted text-muted-foreground ring-border"
             )}
           >
             {enabled ? <GlobeIcon /> : <GlobeLockIcon />}
@@ -94,7 +81,7 @@ export function PublicLink({ site }: { site: Site }) {
                   an account.
                 </>
               ) : owner ? (
-                "Turn it on to share the site without accounts, e.g. with a group."
+                "Turn it on to share the site with people who don’t have an account, like a group chat."
               ) : (
                 "The owner can turn on a link that works without an account."
               )}
@@ -105,33 +92,37 @@ export function PublicLink({ site }: { site: Site }) {
           <div className="flex shrink-0 flex-wrap gap-2">
             {enabled ? (
               <>
-                <Confirm
+                <ConfirmDialog
                   trigger={
-                    <Button variant="outline" disabled={busy !== null} data-testid="rotate-public-link">
-                      <RotateCwIcon /> {busy === "rotate" ? "Rotating…" : "Rotate"}
+                    <Button variant="outline" size="lg" data-testid="rotate-public-link">
+                      <RotateCwIcon /> Rotate
                     </Button>
                   }
                   title="Replace the public link?"
                   description="The current link stops working immediately, and so does access for everyone who opened it. You’ll get a new link to share."
                   action="Rotate link"
+                  pending="Rotating…"
+                  testId="confirm-action"
                   onConfirm={() => run("rotate")}
                 />
-                <Confirm
+                <ConfirmDialog
                   trigger={
-                    <Button variant="ghost" disabled={busy !== null} data-testid="disable-public-link">
-                      {busy === "disable" ? "Turning off…" : "Turn off"}
+                    <Button variant="outline" size="lg" className="text-destructive hover:text-destructive" data-testid="disable-public-link">
+                      Turn off
                     </Button>
                   }
                   title="Turn off the public link?"
                   description="Anyone who isn’t a member loses access on their next page load. Turning it back on issues a new link."
                   action="Turn off"
-                  destructive
+                  pending="Turning off…"
+                  testId="confirm-action"
                   onConfirm={() => run("disable")}
                 />
               </>
             ) : (
-              <Button variant="brand" onClick={() => run("enable")} disabled={busy !== null} data-testid="enable-public-link">
-                <GlobeIcon /> {busy === "enable" ? "Creating…" : "Create public link"}
+              <Button variant="brand" size="lg" onClick={enable} disabled={enabling} data-testid="enable-public-link">
+                {enabling ? <Spinner /> : <GlobeIcon />}
+                {enabling ? "Creating…" : "Create public link"}
               </Button>
             )}
           </div>
@@ -152,39 +143,5 @@ export function PublicLink({ site }: { site: Site }) {
         </IssuedLink>
       )}
     </div>
-  )
-}
-
-function Confirm({
-  trigger,
-  title,
-  description,
-  action,
-  destructive,
-  onConfirm,
-}: {
-  trigger: React.ReactNode
-  title: string
-  description: string
-  action: string
-  destructive?: boolean
-  onConfirm: () => void
-}) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant={destructive ? "destructive" : "brand"} onClick={onConfirm} data-testid="confirm-action">
-            {action}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   )
 }

@@ -8,10 +8,12 @@ import { useEffect, useState } from "react"
 
 import { signUpWithPasskey, startGoogle } from "@/components/auth/ceremonies"
 import { GoogleIcon } from "@/components/auth/google-icon"
-import { AuthFooterLink, AuthHeading, FormError, OrDivider, PasskeyNote, Spinner } from "@/components/auth/parts"
+import { AuthFooterLink, AuthHeading, OrDivider, PasskeyNote } from "@/components/auth/parts"
 import { Button } from "@/components/ui/button"
+import { FormError } from "@/components/ui/form-error"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { errorMessage, safeReturn, useMe } from "@/lib/api"
 
 /** One screen, zero barriers: an email and a passkey, or Google. */

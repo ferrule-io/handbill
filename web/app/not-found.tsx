@@ -18,7 +18,7 @@ export default function NotFound() {
         </Link>
       </div>
       <main className="flex flex-1 flex-col items-center justify-center gap-6 px-5 pb-24 text-center">
-        <p className="eyebrow text-brand">Error 404</p>
+        <p className="eyebrow text-brand-strong">Error 404</p>
         <h1 className="text-[clamp(3.75rem,2rem+9vw,10rem)] leading-none font-medium [font-variation-settings:'SOFT'_100,'WONK'_1]">
           Misprint<span className="text-brand">.</span>
         </h1>

@@ -1,15 +1,17 @@
 "use client"
 
-import { CheckIcon, CornerDownLeftIcon, ShieldAlertIcon, TerminalIcon } from "lucide-react"
+import { CheckIcon, CornerDownLeftIcon, MinusIcon, PlugIcon, ShieldAlertIcon, TerminalIcon } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 
-import { AuthHeading, FormError, Spinner } from "@/components/auth/parts"
+import { AuthHeading } from "@/components/auth/parts"
 import { ConsentError } from "@/components/consent/consent-error"
 import { clientName, decide, getConsent, type ConsentRequest } from "@/components/consent/data"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { FormError } from "@/components/ui/form-error"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { ApiError, errorMessage, loginHref } from "@/lib/api"
 
 const EXPIRED = "This request expired or belongs to another account. Start the connection again from your app."
@@ -49,32 +51,72 @@ export function Consent() {
 
 function ConsentSkeleton() {
   return (
-    <div className="flex flex-col gap-6" aria-busy="true">
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-3 w-24" />
+    <div className="flex flex-col gap-6" aria-busy="true" aria-label="Loading the connection request">
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="mb-2 size-11 rounded-xl" />
+        <Skeleton className="h-4 w-28" />
         <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-9 w-2/3" />
         <Skeleton className="h-4 w-40" />
       </div>
-      <Skeleton className="h-40 w-full rounded-2xl" />
-      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-56 w-full rounded-2xl" />
+      <Skeleton className="h-11 w-full rounded-xl" />
     </div>
   )
 }
 
-const abilities = [
-  "Create sites you own",
-  "Publish, update, and roll back sites you own or manage",
-  "Read their files",
-  "Change titles and descriptions",
-  "Delete sites you own",
+const can = [
+  "Create sites, and publish, update, or roll back the ones you own or manage",
+  "Read the files of those sites, and change their titles and descriptions",
+  "Invite people, change or remove their access, and turn public links on or off",
+  "Delete or hand over sites you own",
 ]
+
+const cannot = [
+  "Open sites that were only shared with you to view",
+  "Sign in to Handbill as you, or change your passkeys and settings",
+]
+
+/**
+ * True once the page has been visible and focused for `delay` ms without
+ * interruption; hiding the tab or blurring the window starts over. Keeps
+ * Allow inert so a window popped up under a double-click can't land on it.
+ */
+function useSettled(delay: number) {
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    let timer: number | undefined
+    const restart = () => {
+      window.clearTimeout(timer)
+      setSettled(false)
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        timer = window.setTimeout(() => setSettled(true), delay)
+      }
+    }
+    restart()
+    document.addEventListener("visibilitychange", restart)
+    window.addEventListener("focus", restart)
+    window.addEventListener("blur", restart)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", restart)
+      window.removeEventListener("focus", restart)
+      window.removeEventListener("blur", restart)
+    }
+  }, [delay])
+  return settled
+}
 
 export function ConsentCard({ request, data }: { request: string; data: ConsentRequest }) {
   const [busy, setBusy] = useState<"allow" | "cancel" | null>(null)
   const [returning, setReturning] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const name = clientName(data.client)
+  const settled = useSettled(500)
+  // Client-supplied strings are isolated so bidi controls in them can't
+  // reorder the text around them.
+  const name = <bdi>{clientName(data.client)}</bdi>
   const { redirect } = data
+  const redirectHost = <bdi>{redirect.host}</bdi>
 
   async function submit(approve: boolean) {
     setBusy(approve ? "allow" : "cancel")
@@ -92,8 +134,8 @@ export function ConsentCard({ request, data }: { request: string; data: ConsentR
   if (returning) {
     return (
       <div className="flex flex-col gap-4" role="status" data-testid="consent-returning">
-        <AuthHeading eyebrow="Connect an app" title={<>Returning you to {name}…</>}>
-          {redirect.loopback && "If nothing happens, you can close this tab."}
+        <AuthHeading icon={<Spinner />} tone="muted" eyebrow="Connect an app" title={<>Returning you to {name}…</>}>
+          {redirect.loopback && <p>If nothing happens in a few seconds, you can close this tab.</p>}
         </AuthHeading>
       </div>
     )
@@ -102,53 +144,46 @@ export function ConsentCard({ request, data }: { request: string; data: ConsentR
   return (
     <div className="flex flex-col gap-6" data-testid="consent-card">
       <AuthHeading
+        icon={<PlugIcon />}
         eyebrow="Connect an app"
         title={
           <>
-            <span className="text-brand">{name}</span> wants to publish sites as{" "}
+            <span className="text-brand-strong">{name}</span> wants to publish sites as{" "}
             <span className="break-words">{data.account.email}</span>
           </>
         }
       >
-        <p className="font-mono text-xs break-all text-foreground" data-testid="consent-client-host">
-          {data.client.host}
-        </p>
-        <p className="mt-1">
-          Sends you back to: <span className="font-mono text-xs break-all text-foreground">{redirect.host}</span>
-        </p>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dt>App</dt>
+          <dd className="font-mono text-xs leading-5 break-all text-foreground" data-testid="consent-client-host">
+            <bdi>{data.client.host}</bdi>
+          </dd>
+          <dt>Returns to</dt>
+          <dd className="font-mono text-xs leading-5 break-all text-foreground" data-testid="consent-redirect-host">
+            {redirectHost}
+          </dd>
+        </dl>
       </AuthHeading>
 
-      <div className="rounded-2xl bg-card p-5 ring-1 ring-border">
-        <p className="eyebrow">It will be able to</p>
-        <ul className="mt-3 flex flex-col gap-2 text-sm">
-          {abilities.map((a) => (
-            <li key={a} className="flex gap-2.5">
-              <CheckIcon className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden="true" />
-              {a}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {(!data.client.verified || redirect.loopback || redirect.host !== data.client.host || data.previouslyAuthorized) && (
+      {(!data.client.verified || redirect.loopback || redirect.host !== data.client.host) && (
         <div className="flex flex-col gap-3">
           {!data.client.verified && (
-            <Alert data-testid="consent-unverified">
+            <Alert variant="warning" data-testid="consent-unverified">
               <ShieldAlertIcon />
-              <AlertTitle>Unverified app.</AlertTitle>
+              <AlertTitle>Handbill can’t confirm who this is</AlertTitle>
               <AlertDescription>
-                This app registered itself; its name was not checked. Only continue if you just started this
-                connection yourself.
+                This app registered itself, so its name wasn’t checked. Only allow it if you started this connection
+                yourself, just now.
               </AlertDescription>
             </Alert>
           )}
           {redirect.loopback ? (
             <Alert data-testid="consent-loopback">
               <TerminalIcon />
-              <AlertTitle>A program on this computer</AlertTitle>
+              <AlertTitle>An app on this computer</AlertTitle>
               <AlertDescription>
-                This connection hands access to a program on this computer ({redirect.host}). Only continue if you
-                just started connecting {name} here.
+                Access goes to a program running on this computer ({redirectHost}), as it does for desktop and
+                command-line agents. Only allow it if you just started connecting {name} here.
               </AlertDescription>
             </Alert>
           ) : (
@@ -156,27 +191,60 @@ export function ConsentCard({ request, data }: { request: string; data: ConsentR
               <Alert>
                 <CornerDownLeftIcon />
                 <AlertDescription>
-                  After you approve, you’ll be sent to <strong className="text-foreground">{redirect.host}</strong>.
+                  After you allow, you’ll be sent to <strong className="text-foreground">{redirectHost}</strong>.
                 </AlertDescription>
               </Alert>
             )
           )}
-          {data.previouslyAuthorized && (
-            <p className="text-sm text-muted-foreground">
-              You’ve connected {name} before: approving again adds a new connection.
-            </p>
-          )}
         </div>
       )}
+
+      <div className="flex flex-col gap-4 rounded-2xl bg-card p-5 ring-1 ring-border">
+        <div className="flex flex-col gap-3">
+          <p className="eyebrow">It will be able to</p>
+          <ul className="flex flex-col gap-2 text-sm">
+            {can.map((a) => (
+              <li key={a} className="flex gap-2.5">
+                <CheckIcon className="mt-0.5 size-4 shrink-0 text-brand-strong" aria-hidden="true" />
+                {a}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          <p className="eyebrow">It won’t be able to</p>
+          <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
+            {cannot.map((a) => (
+              <li key={a} className="flex gap-2.5">
+                <MinusIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                {a}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        {data.previouslyAuthorized && <>You’ve connected {name} before; allowing again adds a new connection. </>}
+        After you allow, you go back to {name}. You can disconnect it at any time in Settings → Security.
+      </p>
 
       <FormError>{error}</FormError>
 
       <div className="flex flex-col gap-2.5 sm:flex-row-reverse">
-        <Button variant="brand" size="lg" className="sm:flex-1" onClick={() => submit(true)} disabled={busy !== null}>
-          {busy === "allow" && <Spinner />} Allow
+        <Button
+          variant="brand"
+          size="xl"
+          className="sm:flex-1"
+          onClick={() => submit(true)}
+          disabled={busy !== null || !settled}
+        >
+          {busy === "allow" && <Spinner data-icon="inline-start" />}
+          {busy === "allow" ? "Allowing…" : "Allow"}
         </Button>
-        <Button variant="outline" size="lg" className="sm:flex-1" onClick={() => submit(false)} disabled={busy !== null}>
-          {busy === "cancel" && <Spinner />} Cancel
+        <Button variant="outline" size="xl" className="sm:flex-1" onClick={() => submit(false)} disabled={busy !== null}>
+          {busy === "cancel" && <Spinner data-icon="inline-start" />}
+          Cancel
         </Button>
       </div>
     </div>

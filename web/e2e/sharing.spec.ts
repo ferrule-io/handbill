@@ -86,7 +86,7 @@ test("an invite link signs a new person up and lands them on the site", async ({
   await guest.getByRole("button", { name: "Create with passkey" }).click()
   await expect(guest).toHaveURL(/\/signup\/codes/)
   await guest.getByLabel(/saved my recovery codes/).check()
-  await guest.getByRole("button", { name: "Continue to handbill" }).click()
+  await guest.getByRole("button", { name: "Continue to Handbill" }).click()
 
   // Back on /invite, the invite is accepted automatically.
   await expect(guest).toHaveURL(`/site?id=${s.siteId}&welcome=1`)

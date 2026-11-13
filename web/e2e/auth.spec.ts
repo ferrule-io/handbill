@@ -80,7 +80,7 @@ test("signed-out visitors are sent to sign in and come back", async ({ page }) =
   await page.getByRole("button", { name: "Create with passkey" }).click()
   await expect(page.getByTestId("recovery-code")).toHaveCount(10)
   await page.getByLabel(/saved my recovery codes/).check()
-  await page.getByRole("button", { name: "Continue to handbill" }).click()
+  await page.getByRole("button", { name: "Continue to Handbill" }).click()
   await expect(page).toHaveURL("/settings/security")
   await expect(page.getByRole("heading", { level: 1, name: "Security" })).toBeVisible()
 })

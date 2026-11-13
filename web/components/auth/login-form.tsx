@@ -8,10 +8,12 @@ import { useEffect, useState } from "react"
 
 import { googleErrors, signInWithPasskey, startGoogle } from "@/components/auth/ceremonies"
 import { GoogleIcon } from "@/components/auth/google-icon"
-import { AuthFooterLink, AuthHeading, FormError, OrDivider, PasskeyNote, Spinner } from "@/components/auth/parts"
+import { AuthFooterLink, AuthHeading, OrDivider, PasskeyNote } from "@/components/auth/parts"
 import { Button } from "@/components/ui/button"
+import { FormError } from "@/components/ui/form-error"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { errorMessage, safeReturn, useMe } from "@/lib/api"
 
 /**
@@ -155,7 +157,7 @@ export function LoginForm() {
       <div className="flex flex-col gap-3 border-t border-border pt-6">
         <Link
           href={"/login/recover" + query}
-          className="group flex items-center gap-3 rounded-lg text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="group flex items-center gap-3 rounded-lg text-sm text-muted-foreground transition-colors hover:text-foreground pointer-coarse:min-h-11"
         >
           <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-foreground ring-1 ring-border [&_svg]:size-4">
             <KeyRoundIcon />

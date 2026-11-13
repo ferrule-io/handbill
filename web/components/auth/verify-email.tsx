@@ -1,11 +1,12 @@
 "use client"
 
-import { ArrowRightIcon, MailCheckIcon, MailXIcon } from "lucide-react"
+import { ArrowRightIcon, MailCheckIcon, MailIcon, MailXIcon } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 
-import { AuthHeading, Spinner } from "@/components/auth/parts"
+import { AuthHeading } from "@/components/auth/parts"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage, refreshMe } from "@/lib/api"
 import { fragmentParam, useHash } from "@/lib/params"
 
@@ -39,17 +40,21 @@ export function VerifyEmail() {
 
   if (view.kind === "pending") {
     return (
-      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-        <Spinner className="size-4" /> Confirming your email…
+      <div className="flex flex-col gap-6" role="status" aria-busy="true">
+        <AuthHeading icon={<MailIcon />} tone="muted" eyebrow="Email verification" title="Confirming your email…">
+          <p className="flex items-center gap-2">
+            <Spinner className="size-4" /> This takes a moment.
+          </p>
+        </AuthHeading>
       </div>
     )
   }
   if (view.kind === "error") {
     return (
       <div className="flex flex-col gap-6">
-        <Icon tone="error" />
-        <AuthHeading eyebrow="Email verification" title="That link didn’t work">
-          {view.message} You can send a fresh link from Settings → Security.
+        <AuthHeading icon={<MailXIcon />} tone="error" eyebrow="Email verification" title="That link didn’t work">
+          <p>{view.message}</p>
+          <p>You can send yourself a fresh link from Settings → Security.</p>
         </AuthHeading>
         <Button asChild variant="outline" size="xl">
           <Link href="/settings/security">Open security settings</Link>
@@ -59,10 +64,11 @@ export function VerifyEmail() {
   }
   return (
     <div className="flex flex-col gap-6">
-      <Icon tone="ok" />
-      <AuthHeading eyebrow="Email verification" title="You’re verified">
-        <span className="font-mono text-foreground">{view.email}</span> is confirmed. Invitations sent to it now reach
-        you automatically.
+      <AuthHeading icon={<MailCheckIcon />} eyebrow="Email verification" title="You’re verified">
+        <p>
+          <span className="font-mono break-all text-foreground">{view.email}</span> is confirmed. Invitations sent to it
+          now reach you automatically.
+        </p>
       </AuthHeading>
       <Button asChild variant="brand" size="xl">
         <Link href="/">
@@ -70,19 +76,5 @@ export function VerifyEmail() {
         </Link>
       </Button>
     </div>
-  )
-}
-
-function Icon({ tone }: { tone: "ok" | "error" }) {
-  return (
-    <span
-      className={
-        tone === "ok"
-          ? "grid size-12 place-items-center rounded-2xl bg-brand-soft text-brand ring-1 ring-brand/20 [&_svg]:size-5"
-          : "grid size-12 place-items-center rounded-2xl bg-destructive/10 text-destructive ring-1 ring-destructive/20 [&_svg]:size-5"
-      }
-    >
-      {tone === "ok" ? <MailCheckIcon /> : <MailXIcon />}
-    </span>
   )
 }

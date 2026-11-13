@@ -55,7 +55,7 @@ export async function signUp(page: Page, email: string): Promise<string[]> {
   await expect(codes).toHaveCount(10)
   const values = await codes.allTextContents()
   await page.getByLabel(/saved my recovery codes/).check()
-  await page.getByRole("button", { name: "Continue to handbill" }).click()
+  await page.getByRole("button", { name: "Continue to Handbill" }).click()
   await expect(page.getByTestId("account-menu")).toBeVisible()
   return values
 }

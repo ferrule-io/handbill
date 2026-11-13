@@ -1,6 +1,5 @@
 "use client"
 
-import { CheckIcon, CopyIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -14,8 +13,11 @@ import {
   type Version,
 } from "@/components/site/data"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
+import { FormError } from "@/components/ui/form-error"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { api, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -35,9 +37,19 @@ export function SiteOverview({
   return (
     <div className="overflow-hidden rounded-2xl bg-card shadow-press ring-1 ring-border">
       {editing && <EditDetails site={site} onDone={onEditDone} />}
-      <dl className={cn("flex flex-col divide-y divide-border text-sm", editing && "border-t border-border")}>
+      <div className={cn("flex flex-col divide-y divide-border text-sm", editing && "border-t border-border")}>
         <Fact label="Address">
-          <SiteAddress url={site.url} />
+          <div className="flex min-w-0 items-center gap-1">
+            <a
+              href={site.url}
+              target="_blank"
+              rel="noreferrer"
+              className="truncate rounded-sm font-mono text-[0.85rem] underline-offset-4 hover:underline"
+            >
+              {site.url}
+            </a>
+            <CopyButton value={site.url} label="Copy site address" iconOnly variant="ghost" size="icon-xs" />
+          </div>
         </Fact>
         <Fact label="Live version">
           {currentVersion ? (
@@ -51,7 +63,7 @@ export function SiteOverview({
             </span>
           ) : (
             <span className="text-muted-foreground">
-              Nothing published yet. Ask an agent to publish to this site over MCP.
+              Nothing published yet. Ask an agent to publish to this site over MCP, and it goes live here.
             </span>
           )}
         </Fact>
@@ -64,45 +76,17 @@ export function SiteOverview({
             <time title={absoluteTime(site.updatedAt)}>{relativeTime(site.updatedAt)}</time>
           </Fact>
         </div>
-      </dl>
+      </div>
     </div>
   )
 }
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1 px-5 py-3.5">
+    <dl className="flex min-w-0 flex-col gap-1 px-5 py-3.5">
       <dt className="eyebrow">{label}</dt>
       <dd className="min-w-0">{children}</dd>
-    </div>
-  )
-}
-
-function SiteAddress({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      <a
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        className="truncate font-mono text-[0.85rem] underline-offset-4 hover:underline"
-      >
-        {url}
-      </a>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label="Copy site address"
-        onClick={async () => {
-          await navigator.clipboard.writeText(url)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
-        }}
-      >
-        {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-      </Button>
-    </div>
+    </dl>
   )
 }
 
@@ -130,7 +114,16 @@ function EditDetails({ site, onDone }: { site: Site; onDone: (saved: boolean) =>
     <form onSubmit={save} className="flex flex-col gap-4 bg-background/40 p-5" aria-label="Edit site details">
       <div className="flex flex-col gap-2">
         <Label htmlFor="site-title">Title</Label>
-        <Input id="site-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required autoFocus />
+        <Input
+          id="site-title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={200}
+          required
+          autoFocus
+          disabled={saving}
+          className="h-10"
+        />
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="site-description">Description</Label>
@@ -141,18 +134,16 @@ function EditDetails({ site, onDone }: { site: Site; onDone: (saved: boolean) =>
           maxLength={2000}
           rows={3}
           placeholder="What is this site for?"
+          disabled={saving}
         />
       </div>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError>{error}</FormError>
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={() => onDone(false)} disabled={saving}>
+        <Button type="button" variant="ghost" size="lg" onClick={() => onDone(false)} disabled={saving}>
           Cancel
         </Button>
-        <Button type="submit" disabled={saving || title.trim() === ""}>
+        <Button type="submit" size="lg" disabled={saving || title.trim() === ""}>
+          {saving && <Spinner />}
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>

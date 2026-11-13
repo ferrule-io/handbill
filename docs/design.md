@@ -60,6 +60,21 @@ The server routes by `Host`: `APP_ORIGIN` host serves the UI, auth, OAuth, and
   detail (overview, members and invites, public link, versions, transfer,
   delete), invite accept, OAuth consent, security settings (passkeys, Google
   link, recovery codes, OAuth grants).
+- One pattern per kind of feedback, in `web/components/ui/`: `CopyButton`
+  (every copy-to-clipboard), `ConfirmDialog` (every consequential action;
+  stays open while pending, shows errors inline), `FormError` (inline errors
+  under forms), `Spinner` (pending buttons, with an "…ing" label); and
+  `LoadError` in `components/layout/empty-state.tsx` for failed loads with a
+  retry. Mutations disable their control while pending.
+- Accessibility: colors meet WCAG AA (text 4.5:1, field outlines and focus
+  rings 3:1) in both themes; `--brand` is the brand-pack vermilion for marks,
+  ticks, and focus rings, and `--brand-strong` the AA-safe one for text and
+  fills under text. Touch screens (`pointer-coarse`) get 44 px targets.
+  Client-supplied strings (OAuth client names and hosts) render inside
+  `<bdi>`. The consent screen's Allow button stays disabled until the page
+  has been visible and focused for 500 ms (clickjacking). `web/e2e/a11y.spec.ts`
+  runs axe on every main screen in light and dark and fails on serious or
+  critical violations.
 
 ### Site file server
 

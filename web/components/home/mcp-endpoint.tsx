@@ -1,9 +1,8 @@
 "use client"
 
-import { CheckIcon, CopyIcon } from "lucide-react"
-import { useState, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
 
-import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import { cn } from "@/lib/utils"
 
 const noop = () => () => {}
@@ -11,7 +10,6 @@ const noop = () => () => {}
 /** The server's MCP URL with a copy button; the origin is known only in the browser. */
 export function McpEndpoint({ className }: { className?: string }) {
   const origin = useSyncExternalStore(noop, () => window.location.origin, () => null)
-  const [copied, setCopied] = useState(false)
   const url = origin ? `${origin}/mcp` : "/mcp"
 
   return (
@@ -21,20 +19,9 @@ export function McpEndpoint({ className }: { className?: string }) {
         className
       )}
     >
-      <span className="eyebrow mr-1 text-brand">MCP</span>
+      <span className="eyebrow mr-1 text-brand-strong">MCP</span>
       <code className="truncate font-mono text-[0.8rem] text-foreground">{url}</code>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Copy MCP URL"
-        onClick={async () => {
-          await navigator.clipboard.writeText(url)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
-        }}
-      >
-        {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-      </Button>
+      <CopyButton value={url} label="Copy MCP URL" iconOnly variant="ghost" />
     </div>
   )
 }

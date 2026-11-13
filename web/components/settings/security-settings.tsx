@@ -22,15 +22,17 @@ import { toast } from "sonner"
 
 import { addPasskey, googleErrors, startGoogle, type Passkey } from "@/components/auth/ceremonies"
 import { GoogleIcon } from "@/components/auth/google-icon"
-import { Spinner } from "@/components/auth/parts"
 import { RecoveryCodes } from "@/components/auth/recovery-codes"
 import { Container, Stack } from "@/components/layout/container"
+import { LoadError } from "@/components/layout/empty-state"
 import { PageHeader, Section } from "@/components/layout/page-header"
 import { OAuthGrants } from "@/components/settings/oauth-grants"
 import { formatDate, relative, Row, RowSkeleton } from "@/components/settings/row"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage, refreshMe, useMe } from "@/lib/api"
 
 type Security = {
@@ -78,16 +80,24 @@ export function SecuritySettings() {
           title="Security"
           description="How you sign in, how you get back in, and which agents can publish as you."
         />
-        {loadError && (
-          <p role="alert" className="text-sm text-destructive">
-            {loadError}
-          </p>
+        {loadError && !data ? (
+          <LoadError
+            title="Couldn’t load your security settings"
+            message={loadError}
+            onRetry={() => {
+              setLoadError(null)
+              void reload()
+            }}
+          />
+        ) : (
+          <>
+            <EmailSection data={data} />
+            <PasskeysSection data={data} reload={reload} />
+            <GoogleSection data={data} reload={reload} />
+            <RecoverySection data={data} reload={reload} />
+            <SessionsSection data={data} reload={reload} />
+          </>
         )}
-        <EmailSection data={data} />
-        <PasskeysSection data={data} reload={reload} />
-        <GoogleSection data={data} reload={reload} />
-        <RecoverySection data={data} reload={reload} />
-        <SessionsSection data={data} reload={reload} />
         <OAuthGrants />
       </Stack>
     </Container>
@@ -120,7 +130,7 @@ function EmailSection({ data }: { data: Security | null }) {
       ) : (
         <Row
           icon={<MailIcon />}
-          title={<span className="font-mono text-[0.85rem]">{email.email}</span>}
+          title={<span className="font-mono text-[0.85rem] break-all">{email.email}</span>}
           badge={
             email.verified ? (
               <Badge variant="secondary" className="gap-1 text-success">
@@ -141,7 +151,8 @@ function EmailSection({ data }: { data: Security | null }) {
             !email.verified &&
             mailEnabled && (
               <Button variant="outline" size="sm" onClick={send} disabled={busy}>
-                {busy && <Spinner />} Send link
+                {busy ? <Spinner /> : <MailIcon />}
+                {busy ? "Sending…" : "Send link"}
               </Button>
             )
           }
@@ -172,7 +183,8 @@ function PasskeysSection({ data, reload }: SectionProps) {
       description="Sign in with your device. Add one per device, or use a synced passkey from your password manager."
       actions={
         <Button variant="outline" size="sm" onClick={add} disabled={adding || !data}>
-          {adding ? <Spinner /> : <PlusIcon />} Add passkey
+          {adding ? <Spinner /> : <PlusIcon />}
+          {adding ? "Waiting for your passkey…" : "Add passkey"}
         </Button>
       }
     >
@@ -193,7 +205,6 @@ function PasskeysSection({ data, reload }: SectionProps) {
 
 function PasskeyRow({ passkey, canRemove, reload }: { passkey: Passkey; canRemove: boolean; reload: () => Promise<void> }) {
   const [editing, setEditing] = useState(false)
-  const [confirming, setConfirming] = useState(false)
   const [name, setName] = useState(passkey.name)
   const [busy, setBusy] = useState(false)
 
@@ -211,25 +222,13 @@ function PasskeyRow({ passkey, canRemove, reload }: { passkey: Passkey; canRemov
     }
   }
 
-  async function remove() {
-    setBusy(true)
-    try {
-      await api(`/app-api/auth/passkeys/${passkey.id}`, { method: "DELETE" })
-      toast.success(`Removed “${passkey.name}”.`)
-      await reload()
-    } catch (err) {
-      toast.error(errorMessage(err))
-      setBusy(false)
-      setConfirming(false)
-    }
-  }
-
   const icon =
     passkey.attachment === "cross-platform" && !passkey.synced ? <UsbIcon /> : passkey.synced ? <KeyRoundIcon /> : <FingerprintIcon />
   const meta = [
     passkey.synced ? "Synced" : passkey.attachment === "cross-platform" ? "Security key" : "This device only",
     `added ${formatDate(passkey.createdAt)}`,
     passkey.lastUsedAt ? `last used ${relative(passkey.lastUsedAt)}` : "never used to sign in",
+    ...(canRemove ? [] : ["your only way to sign in"]),
   ].join(" · ")
 
   return (
@@ -238,7 +237,7 @@ function PasskeyRow({ passkey, canRemove, reload }: { passkey: Passkey; canRemov
         icon={icon}
         title={
           editing ? (
-            <form onSubmit={rename} className="flex items-center gap-1.5">
+            <form onSubmit={rename} className="flex w-full items-center gap-1.5">
               <Input
                 aria-label="Passkey name"
                 value={name}
@@ -249,13 +248,14 @@ function PasskeyRow({ passkey, canRemove, reload }: { passkey: Passkey; canRemov
                 disabled={busy}
               />
               <Button type="submit" size="icon-sm" variant="outline" aria-label="Save name" disabled={busy || !name.trim()}>
-                <CheckIcon />
+                {busy ? <Spinner /> : <CheckIcon />}
               </Button>
               <Button
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Cancel"
+                aria-label="Cancel renaming"
+                disabled={busy}
                 onClick={() => {
                   setEditing(false)
                   setName(passkey.name)
@@ -277,34 +277,31 @@ function PasskeyRow({ passkey, canRemove, reload }: { passkey: Passkey; canRemov
         }
         detail={meta}
         action={
-          !editing &&
-          (confirming ? (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">Remove?</span>
-              <Button size="sm" variant="destructive" onClick={remove} disabled={busy}>
-                {busy && <Spinner />} Remove
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
-                Keep
-              </Button>
-            </div>
-          ) : (
+          !editing && (
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(true)} aria-label={`Rename ${passkey.name}`}>
                 <PencilIcon /> Rename
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive hover:text-destructive"
-                onClick={() => setConfirming(true)}
-                disabled={!canRemove}
-                title={canRemove ? undefined : "Your only way to sign in. Add another passkey or link Google first."}
-              >
-                Remove
-              </Button>
+              {canRemove && (
+                <ConfirmDialog
+                  trigger={
+                    <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" aria-label={`Remove ${passkey.name}`}>
+                      Remove
+                    </Button>
+                  }
+                  title={`Remove “${passkey.name}”?`}
+                  description="You won’t be able to sign in with it any more. Sites and other passkeys aren’t affected."
+                  action="Remove passkey"
+                  pending="Removing…"
+                  onConfirm={async () => {
+                    await api(`/app-api/auth/passkeys/${passkey.id}`, { method: "DELETE" })
+                    toast.success(`Removed “${passkey.name}”.`)
+                    await reload()
+                  }}
+                />
+              )}
             </div>
-          ))
+          )
         }
       />
     </li>
@@ -313,37 +310,23 @@ function PasskeyRow({ passkey, canRemove, reload }: { passkey: Passkey; canRemov
 
 function GoogleSection({ data, reload }: SectionProps) {
   const { googleEnabled } = useMe()
-  const [busy, setBusy] = useState(false)
-  const [confirming, setConfirming] = useState(false)
+  const [linking, setLinking] = useState(false)
   const onlyMethod = !!data?.google && data.passkeys.length === 0
 
   async function link() {
-    setBusy(true)
+    setLinking(true)
     try {
       await startGoogle("link")
     } catch (err) {
       toast.error(errorMessage(err))
-      setBusy(false)
-    }
-  }
-  async function unlink() {
-    setBusy(true)
-    try {
-      await api("/app-api/auth/google", { method: "DELETE" })
-      toast.success("Google account unlinked.")
-      setConfirming(false)
-      await reload()
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setBusy(false)
+      setLinking(false)
     }
   }
 
   if (!googleEnabled && !data?.google) {
     return (
       <Section title="Google" description="A second way in, linked explicitly.">
-        <Row icon={<GoogleIcon />} title="Not available" detail="Google sign-in isn’t configured on this server." />
+        <Row icon={<GoogleIcon />} title="Not available" detail="Google sign-in isn’t set up on this server." />
       </Section>
     )
   }
@@ -354,29 +337,31 @@ function GoogleSection({ data, reload }: SectionProps) {
       ) : data.google ? (
         <Row
           icon={<GoogleIcon />}
-          title={<span className="font-mono text-[0.85rem]">{data.google.email || "Google account"}</span>}
+          title={<span className="font-mono text-[0.85rem] break-all">{data.google.email || "Google account"}</span>}
           badge={<Badge variant="secondary">Linked</Badge>}
-          detail={`Linked ${formatDate(data.google.linkedAt)}${data.google.lastUsedAt ? ` · last used ${relative(data.google.lastUsedAt)}` : ""}`}
+          detail={[
+            `Linked ${formatDate(data.google.linkedAt)}`,
+            ...(data.google.lastUsedAt ? [`last used ${relative(data.google.lastUsedAt)}`] : []),
+            ...(onlyMethod ? ["your only way to sign in, so add a passkey before unlinking"] : []),
+          ].join(" · ")}
           action={
-            confirming ? (
-              <div className="flex items-center gap-1.5">
-                <Button size="sm" variant="destructive" onClick={unlink} disabled={busy}>
-                  {busy && <Spinner />} Unlink
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
-                  Keep
-                </Button>
-              </div>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setConfirming(true)}
-                disabled={onlyMethod}
-                title={onlyMethod ? "Add a passkey before unlinking your only way to sign in." : undefined}
-              >
-                Unlink
-              </Button>
+            !onlyMethod && (
+              <ConfirmDialog
+                trigger={
+                  <Button size="sm" variant="outline">
+                    Unlink
+                  </Button>
+                }
+                title="Unlink your Google account?"
+                description="You won’t be able to sign in with Google until you link it again. Your passkeys keep working."
+                action="Unlink Google"
+                pending="Unlinking…"
+                onConfirm={async () => {
+                  await api("/app-api/auth/google", { method: "DELETE" })
+                  toast.success("Google account unlinked.")
+                  await reload()
+                }}
+              />
             )
           }
         />
@@ -386,8 +371,8 @@ function GoogleSection({ data, reload }: SectionProps) {
           title="Not linked"
           detail="Link a Google account to sign in with it too."
           action={
-            <Button size="sm" variant="outline" onClick={link} disabled={busy}>
-              {busy ? <Spinner /> : <GoogleIcon className="size-3.5" />} Link Google
+            <Button size="sm" variant="outline" onClick={link} disabled={linking}>
+              {linking ? <Spinner /> : <GoogleIcon className="size-3.5" />} Link Google
             </Button>
           }
         />
@@ -398,20 +383,12 @@ function GoogleSection({ data, reload }: SectionProps) {
 
 function RecoverySection({ data, reload }: SectionProps) {
   const { user } = useMe()
-  const [stage, setStage] = useState<"idle" | "confirm" | "busy">("idle")
   const [codes, setCodes] = useState<string[] | null>(null)
 
   async function regenerate() {
-    setStage("busy")
-    try {
-      const r = await api<{ codes: string[] }>("/app-api/auth/recovery-codes", { method: "POST" })
-      setCodes(r.codes)
-      await reload()
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setStage("idle")
-    }
+    const r = await api<{ codes: string[] }>("/app-api/auth/recovery-codes", { method: "POST" })
+    setCodes(r.codes)
+    await reload()
   }
 
   const rc = data?.recoveryCodes
@@ -421,33 +398,33 @@ function RecoverySection({ data, reload }: SectionProps) {
       title="Recovery codes"
       description="Ten single-use codes for when every passkey is gone. Each opens a session that can only add a new passkey."
       actions={
-        stage === "confirm" ? (
-          <div className="flex items-center gap-1.5">
-            <Button size="sm" variant="brand" onClick={regenerate}>
-              Replace codes
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setStage("idle")}>
-              Cancel
-            </Button>
-          </div>
+        rc?.total ? (
+          <ConfirmDialog
+            trigger={
+              <Button size="sm" variant="outline" disabled={!data}>
+                <RefreshCwIcon /> Regenerate
+              </Button>
+            }
+            tone="brand"
+            title="Replace your recovery codes?"
+            description="You get ten new codes, shown once. Every earlier code stops working, used or not."
+            action="Replace codes"
+            pending="Generating…"
+            onConfirm={regenerate}
+          />
         ) : (
-          <Button size="sm" variant="outline" onClick={() => setStage("confirm")} disabled={!data || stage === "busy"}>
-            {stage === "busy" ? <Spinner /> : <RefreshCwIcon />} {rc?.total ? "Regenerate" : "Generate"}
-          </Button>
+          <GenerateCodes disabled={!data} onGenerate={regenerate} />
         )
       }
     >
       <div className="flex flex-col gap-4">
-        {stage === "confirm" && (
-          <p className="text-sm text-muted-foreground">New codes replace every earlier code, used or not.</p>
-        )}
         {codes ? (
           <div className="flex flex-col gap-3">
             <RecoveryCodes codes={codes} email={user?.email} />
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">Save them now. They won’t be shown again.</p>
-              <Button size="sm" variant="ghost" onClick={() => setCodes(null)}>
-                Done
+              <Button size="sm" variant="outline" onClick={() => setCodes(null)}>
+                I’ve saved them
               </Button>
             </div>
           </div>
@@ -480,6 +457,26 @@ function RecoverySection({ data, reload }: SectionProps) {
   )
 }
 
+function GenerateCodes({ disabled, onGenerate }: { disabled: boolean; onGenerate: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  async function generate() {
+    setBusy(true)
+    try {
+      await onGenerate()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Button size="sm" variant="outline" onClick={generate} disabled={disabled || busy}>
+      {busy ? <Spinner /> : <RefreshCwIcon />}
+      {busy ? "Generating…" : "Generate"}
+    </Button>
+  )
+}
+
 function SessionsSection({ data, reload }: SectionProps) {
   const [busy, setBusy] = useState(false)
   const others = data ? data.sessions.filter((s) => !s.current).length : 0
@@ -502,7 +499,8 @@ function SessionsSection({ data, reload }: SectionProps) {
       description="Browsers signed in to this account. Sessions end after 30 days without use."
       actions={
         <Button variant="outline" size="sm" onClick={revoke} disabled={busy || others === 0}>
-          {busy && <Spinner />} Sign out other sessions
+          {busy && <Spinner />}
+          {busy ? "Signing out…" : "Sign out other sessions"}
         </Button>
       }
     >

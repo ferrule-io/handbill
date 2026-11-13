@@ -6,8 +6,10 @@ import { useState } from "react"
 import { absoluteTime, roleLabel, type Role, type Site } from "@/components/site/data"
 import { IssuedLink } from "@/components/site/members-link"
 import { Button } from "@/components/ui/button"
+import { FormError } from "@/components/ui/form-error"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -79,12 +81,14 @@ export function InviteForm({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              disabled={busy}
               className="h-10 flex-1"
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? "invite-error" : undefined}
             />
             <Button type="submit" variant="brand" size="lg" className="h-10" disabled={busy || email.trim() === ""} data-testid="send-invite">
-              <SendIcon /> {busy ? "Inviting…" : "Invite"}
+              {busy ? <Spinner /> : <SendIcon />}
+              {busy ? "Inviting…" : "Invite"}
             </Button>
           </div>
         </div>
@@ -96,7 +100,7 @@ export function InviteForm({
                 <label
                   key={r}
                   className={cn(
-                    "flex cursor-pointer items-start gap-3 rounded-xl px-3.5 py-3 ring-1 transition-colors",
+                    "flex cursor-pointer items-start gap-3 rounded-xl px-3.5 py-3 ring-1 transition-colors has-focus-visible:ring-2 has-focus-visible:ring-ring",
                     role === r ? "bg-brand-soft/50 ring-brand/50" : "ring-border hover:bg-muted/60"
                   )}
                 >
@@ -106,7 +110,7 @@ export function InviteForm({
                     value={r}
                     checked={role === r}
                     onChange={() => setRole(r)}
-                    className="mt-1 size-4 shrink-0 accent-(--brand)"
+                    className="mt-1 size-4 shrink-0 accent-(--brand-strong) focus-visible:outline-none"
                     data-testid={`invite-role-${r}`}
                   />
                   <span className="flex flex-col gap-0.5">
@@ -123,22 +127,18 @@ export function InviteForm({
           </p>
         )}
         {mailEnabled && (
-          <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+          <label className="flex w-fit cursor-pointer items-center gap-2.5 text-sm pointer-coarse:min-h-11">
             <input
               type="checkbox"
               checked={notify}
               onChange={(e) => setNotify(e.target.checked)}
-              className="size-4 shrink-0 accent-(--brand)"
+              className="size-4 shrink-0 accent-(--brand-strong)"
               data-testid="invite-notify"
             />
             Email them the link
           </label>
         )}
-        {error && (
-          <p id="invite-error" role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
+        <FormError id="invite-error">{error}</FormError>
       </form>
       {issued && (
         <IssuedLink

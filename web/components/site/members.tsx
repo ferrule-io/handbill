@@ -1,24 +1,15 @@
 "use client"
 
-import { ClockIcon, EllipsisIcon, MailIcon, RefreshCwIcon, ShieldIcon, UserMinusIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, ClockIcon, MailIcon, ShieldIcon, UserMinusIcon, XIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { EmptyState } from "@/components/layout/empty-state"
+import { LoadError } from "@/components/layout/empty-state"
 import { absoluteTime, can, relativeTime, roleLabel, useApi, type Role, type Site } from "@/components/site/data"
 import { InviteForm } from "@/components/site/members-invite"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { api, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -53,18 +45,7 @@ export function SiteMembers({ site }: { site: Site }) {
     <div className="flex flex-col gap-6">
       <InviteForm site={site} mailEnabled={load.state === "ready" && load.data.mailEnabled} onInvited={reload} />
       {load.state === "loading" && <ListSkeleton />}
-      {load.state === "error" && (
-        <EmptyState
-          title="Couldn’t load members"
-          actions={
-            <Button variant="outline" onClick={reload}>
-              <RefreshCwIcon /> Try again
-            </Button>
-          }
-        >
-          <p>{load.error.message}</p>
-        </EmptyState>
-      )}
+      {load.state === "error" && <LoadError title="Couldn’t load members" message={load.error.message} onRetry={reload} />}
       {load.state === "ready" && (
         <>
           <ul
@@ -78,9 +59,12 @@ export function SiteMembers({ site }: { site: Site }) {
           </ul>
           {load.data.invites.length > 0 && (
             <div className="flex flex-col gap-3">
-              <h3 className="eyebrow">Pending invites</h3>
+              <h3 className="eyebrow" id="pending-invites">
+                Pending invites
+              </h3>
               <ul
                 className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border"
+                aria-labelledby="pending-invites"
                 data-testid="invite-list"
               >
                 {load.data.invites.map((inv) => (
@@ -97,12 +81,15 @@ export function SiteMembers({ site }: { site: Site }) {
 
 function ListSkeleton() {
   return (
-    <div className="divide-y divide-border rounded-2xl bg-card ring-1 ring-border" aria-busy="true">
+    <div className="divide-y divide-border rounded-2xl bg-card ring-1 ring-border" aria-busy="true" aria-label="Loading members">
       {[0, 1, 2].map((i) => (
-        <div key={i} className="flex items-center gap-3 px-5 py-4">
+        <div key={i} className="flex items-center gap-3 px-5 py-3.5">
           <Skeleton className="size-9 rounded-full" />
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="ml-auto h-6 w-20" />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Skeleton className="h-4 w-48 max-w-full" />
+            <Skeleton className="h-3 w-28" />
+          </div>
+          <Skeleton className="h-7 w-20" />
         </div>
       ))}
     </div>
@@ -115,7 +102,9 @@ function Avatar({ label, pending }: { label: string; pending?: boolean }) {
       aria-hidden="true"
       className={cn(
         "grid size-9 shrink-0 place-items-center rounded-full font-heading text-sm font-medium uppercase ring-1",
-        pending ? "border border-dashed border-input bg-background text-muted-foreground ring-0" : "bg-brand-soft text-brand ring-brand/20"
+        pending
+          ? "border border-dashed border-input bg-background text-muted-foreground ring-0"
+          : "bg-brand-soft text-brand-strong ring-brand/20"
       )}
     >
       {pending ? <MailIcon className="size-4" /> : label.slice(0, 1)}
@@ -159,21 +148,6 @@ function MemberRow({ site, member, onChange }: { site: Site; member: Member; onC
     }
   }
 
-  async function remove(e: React.MouseEvent) {
-    e.preventDefault()
-    setBusy(true)
-    try {
-      await api(`/app-api/sites/${site.id}/members/${member.userId}`, { method: "DELETE" })
-      toast.success(`Removed ${name}`)
-      setConfirming(false)
-      onChange()
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <li className="flex items-center gap-3 px-5 py-3.5" data-testid="member-row" data-email={member.email ?? undefined}>
       <Avatar label={name} />
@@ -190,8 +164,9 @@ function MemberRow({ site, member, onChange }: { site: Site; member: Member; onC
       {canChangeRole || canRemove ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" disabled={busy} aria-label={`Manage ${name}`} data-testid="member-menu">
-              {roleLabel[member.role]} <EllipsisIcon />
+            <Button variant="outline" size="sm" disabled={busy} aria-label={`Manage ${name}, ${roleLabel[member.role]}`} data-testid="member-menu">
+              {busy && <Spinner />}
+              {roleLabel[member.role]} <ChevronDownIcon />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
@@ -223,23 +198,20 @@ function MemberRow({ site, member, onChange }: { site: Site; member: Member; onC
       ) : (
         <RoleBadge role={member.role} />
       )}
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove {name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              They lose access to {site.title} on their next page load, including any tab they have open. You can invite
-              them again later.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={remove} disabled={busy} data-testid="confirm-remove">
-              {busy ? "Removing…" : "Remove access"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Remove ${name}?`}
+        description={`They lose access to ${site.title} on their next page load, including any tab they have open. You can invite them again later.`}
+        action="Remove access"
+        pending="Removing…"
+        testId="confirm-remove"
+        onConfirm={async () => {
+          await api(`/app-api/sites/${site.id}/members/${member.userId}`, { method: "DELETE" })
+          toast.success(`Removed ${name}`)
+          onChange()
+        }}
+      />
     </li>
   )
 }
@@ -266,7 +238,7 @@ function InviteRow({ site, invite, onChange }: { site: Site; invite: PendingInvi
       <div className="flex min-w-0 flex-1 flex-col">
         <p className="truncate text-sm">{invite.email}</p>
         <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-          <ClockIcon className="size-3 shrink-0" />
+          <ClockIcon className="size-3 shrink-0" aria-hidden="true" />
           <span className="truncate">
             {roleLabel[invite.role]} · expires{" "}
             <time title={absoluteTime(invite.expiresAt)}>{relativeTime(invite.expiresAt)}</time>
@@ -275,8 +247,16 @@ function InviteRow({ site, invite, onChange }: { site: Site; invite: PendingInvi
         </p>
       </div>
       {canRevoke && (
-        <Button variant="ghost" size="sm" onClick={revoke} disabled={busy} data-testid="revoke-invite">
-          <XIcon /> {busy ? "Revoking…" : "Revoke"}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={revoke}
+          disabled={busy}
+          aria-label={`Revoke invite for ${invite.email}`}
+          data-testid="revoke-invite"
+        >
+          {busy ? <Spinner /> : <XIcon />}
+          {busy ? "Revoking…" : "Revoke"}
         </Button>
       )}
     </li>

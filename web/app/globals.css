@@ -53,6 +53,7 @@
   --color-ring: var(--ring);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
   --color-ink: var(--ink);
   --color-paper: var(--paper);
@@ -88,10 +89,14 @@
   --paper: oklch(0.982 0.009 84);
   --ink: oklch(0.215 0.028 266);
   --brand: oklch(0.615 0.205 33);
+  /* Vermilion deep enough for text and for fills under text (AA 4.5:1 on
+     paper, card, and brand-soft; under brand-foreground). --brand itself
+     stays the brand-pack value for marks, ticks, and focus rings. */
+  --brand-strong: oklch(0.53 0.19 33);
   --brand-foreground: oklch(0.99 0.01 84);
   --brand-soft: oklch(0.93 0.045 40);
   --rule: oklch(0.885 0.014 84);
-  --success: oklch(0.58 0.12 155);
+  --success: oklch(0.5 0.12 155);
 
   /* Semantic tokens */
   --background: var(--paper);
@@ -108,9 +113,10 @@
   --muted-foreground: oklch(0.5 0.022 266);
   --accent: oklch(0.945 0.014 84);
   --accent-foreground: var(--ink);
-  --destructive: oklch(0.56 0.21 25);
+  --destructive: oklch(0.53 0.2 25);
   --border: var(--rule);
-  --input: oklch(0.86 0.016 84);
+  /* Field outlines: 3:1 against paper and card (WCAG 1.4.11). */
+  --input: oklch(0.64 0.016 84);
   --ring: var(--brand);
   --chart-1: var(--brand);
   --chart-2: oklch(0.55 0.1 230);
@@ -126,6 +132,7 @@
   --paper: oklch(0.935 0.013 84);
   --ink: oklch(0.165 0.016 266);
   --brand: oklch(0.71 0.165 40);
+  --brand-strong: var(--brand);
   --brand-foreground: oklch(0.17 0.02 266);
   --brand-soft: oklch(0.3 0.06 38);
   --rule: oklch(0.29 0.018 266);
@@ -147,7 +154,7 @@
   --accent-foreground: var(--paper);
   --destructive: oklch(0.7 0.18 25);
   --border: var(--rule);
-  --input: oklch(0.33 0.02 266);
+  --input: oklch(0.5 0.02 266);
   --ring: var(--brand);
 
   --grid-dot: oklch(0.935 0.013 84 / 0.06);
@@ -184,8 +191,19 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+  /* One visible focus style for anything that doesn't draw its own ring. */
   :focus-visible {
-    outline-color: var(--ring);
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 

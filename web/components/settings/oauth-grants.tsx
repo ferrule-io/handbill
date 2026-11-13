@@ -5,24 +5,18 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 
 import { clientName, deleteGrant, listGrants, type Grant } from "@/components/consent/data"
+import { LoadError } from "@/components/layout/empty-state"
 import { Section } from "@/components/layout/page-header"
 import { formatDate, relative, Row, RowSkeleton } from "@/components/settings/row"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { errorMessage } from "@/lib/api"
 
-/** Connected agents on /settings/security: OAuth grants, disconnectable. */
+/**
+ * Connected agents on /settings/security: OAuth grants, disconnectable.
+ * Client names and hosts are client-supplied, so they render inside <bdi>.
+ */
 export function OAuthGrants() {
   const [grants, setGrants] = useState<Grant[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -44,26 +38,37 @@ export function OAuthGrants() {
   }, [])
 
   return (
-    <Section title="Connected agents" description="MCP clients you’ve authorized to publish on your behalf.">
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+    <Section title="Connected agents" description="MCP clients you’ve allowed to publish on your behalf.">
+      {error && !grants ? (
+        <LoadError
+          title="Couldn’t load connected agents"
+          message={error}
+          onRetry={() => {
+            setError(null)
+            void reload()
+          }}
+        />
       ) : !grants ? (
         <RowSkeleton />
       ) : grants.length === 0 ? (
-        <Row icon={<PlugIcon />} title="No connected agents" detail="Authorize an MCP client and it will be listed here." />
+        <Row
+          icon={<PlugIcon />}
+          title="No connected agents"
+          detail="When you allow an MCP client to publish as you, it appears here and you can disconnect it."
+        />
       ) : (
         <ul className="flex flex-col gap-3" data-testid="oauth-grants">
           {grants.map((g) => (
             <li key={g.id}>
               <Row
                 icon={<PlugIcon />}
-                title={clientName(g.client)}
+                title={<bdi>{clientName(g.client)}</bdi>}
                 badge={!g.client.verified && <Badge variant="outline">Unverified</Badge>}
                 detail={
                   <>
-                    <span className="font-mono text-xs break-all text-foreground">{g.client.host}</span>
+                    <span className="font-mono text-xs break-all text-foreground">
+                      <bdi>{g.client.host}</bdi>
+                    </span>
                     <br />
                     Connected {formatDate(g.createdAt)}
                     {g.lastUsedAt ? ` · last used ${relative(g.lastUsedAt)}` : " · not used yet"}
@@ -80,44 +85,28 @@ export function OAuthGrants() {
 }
 
 function Disconnect({ grant, onDone }: { grant: Grant; onDone: () => Promise<void> }) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const name = clientName(grant.client)
-  async function disconnect() {
-    setBusy(true)
-    try {
-      await deleteGrant(grant.id)
-      toast.success(`Disconnected ${name}.`)
-      setOpen(false)
-      await onDone()
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const name = <bdi>{clientName(grant.client)}</bdi>
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>
+    <ConfirmDialog
+      trigger={
         <Button variant="outline" size="sm">
           Disconnect
         </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Disconnect {name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {name} will lose access immediately: its next request fails, and it has to ask you again to
-            reconnect. Sites it published stay as they are.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={disconnect} disabled={busy}>
-            {busy ? "Disconnecting…" : "Disconnect"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      }
+      title={<>Disconnect {name}?</>}
+      description={
+        <>
+          {name} loses access immediately: its next request fails, and it has to ask you again to reconnect. Sites it
+          published stay as they are.
+        </>
+      }
+      action="Disconnect"
+      pending="Disconnecting…"
+      onConfirm={async () => {
+        await deleteGrant(grant.id)
+        toast.success(<>Disconnected {name}.</>)
+        await onDone()
+      }}
+    />
   )
 }

@@ -10,15 +10,16 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 export const metadata: Metadata = {
-  title: { default: "handbill", template: "%s · handbill" },
+  title: { default: "Handbill", template: "%s · Handbill" },
   description: "Self-hosted static sites published by your agents.",
   robots: { index: false, follow: false },
 }
 
+// The paper and ink tokens (app/globals.css) as sRGB.
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf6ef" },
-    { media: "(prefers-color-scheme: dark)", color: "#14171f" },
+    { media: "(prefers-color-scheme: light)", color: "#fcf9f2" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0e15" },
   ],
 }
 

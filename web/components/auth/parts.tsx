@@ -1,39 +1,44 @@
-import { CircleAlertIcon, LoaderCircleIcon } from "lucide-react"
-
 import { cn } from "@/lib/utils"
 
-/** Eyebrow, serif headline, and lede at the top of every auth screen. */
+/**
+ * Optional icon tile, eyebrow, serif headline, and lede at the top of
+ * every auth-shell screen (sign-in, invites, consent, verification).
+ */
 export function AuthHeading({
+  icon,
+  tone = "brand",
   eyebrow,
   title,
   children,
+  titleTestId,
 }: {
+  icon?: React.ReactNode
+  tone?: "brand" | "muted" | "error"
   eyebrow: React.ReactNode
   title: React.ReactNode
   children?: React.ReactNode
+  titleTestId?: string
 }) {
   return (
     <div className="flex flex-col gap-2.5">
-      <p className="eyebrow">{eyebrow}</p>
-      <h1 className="text-[2rem] leading-[1.08] font-medium tracking-[-0.015em]">{title}</h1>
-      {children && <div className="text-sm leading-relaxed text-muted-foreground">{children}</div>}
-    </div>
-  )
-}
-
-/** Inline, announced error under a form. */
-export function FormError({ children, className }: { children?: React.ReactNode; className?: string }) {
-  if (!children) return null
-  return (
-    <div
-      role="alert"
-      className={cn(
-        "flex gap-2.5 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2.5 text-sm leading-snug text-destructive dark:bg-destructive/12",
-        className
+      {icon && (
+        <div
+          aria-hidden="true"
+          className={cn(
+            "mb-2 grid size-11 place-items-center rounded-xl ring-1 [&_svg]:size-5",
+            tone === "brand" && "bg-brand-soft text-brand-strong ring-brand/20",
+            tone === "muted" && "bg-muted text-foreground ring-border",
+            tone === "error" && "bg-destructive/10 text-destructive ring-destructive/20"
+          )}
+        >
+          {icon}
+        </div>
       )}
-    >
-      <CircleAlertIcon className="mt-px size-4 shrink-0" aria-hidden="true" />
-      <div>{children}</div>
+      <p className="eyebrow">{eyebrow}</p>
+      <h1 className="text-[2rem] leading-[1.08] font-medium tracking-[-0.015em] text-balance" data-testid={titleTestId}>
+        {title}
+      </h1>
+      {children && <div className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">{children}</div>}
     </div>
   )
 }
@@ -47,10 +52,6 @@ export function OrDivider() {
       <span className="h-px flex-1 bg-border" />
     </div>
   )
-}
-
-export function Spinner({ className, ...props }: React.ComponentProps<typeof LoaderCircleIcon>) {
-  return <LoaderCircleIcon className={cn("animate-spin", className)} aria-hidden="true" {...props} />
 }
 
 /** Small print under the primary passkey action. */
