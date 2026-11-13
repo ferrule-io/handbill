@@ -68,7 +68,7 @@ test("owner opens the site through the handoff, browses it, and rolls back", asy
 
   // The site is listed on the home page.
   await page.goto("/")
-  const card = page.getByTestId("site-list").getByRole("link", { name: "Kyoto in April" })
+  const card = page.getByTestId("site-list").getByRole("link", { name: "Kyoto in April", exact: true })
   await expect(card).toBeVisible()
   await card.click()
   await expect(page).toHaveURL(`/site?id=${siteId}`)

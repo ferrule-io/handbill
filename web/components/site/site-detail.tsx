@@ -1,8 +1,9 @@
 "use client"
 
-import { ArrowLeftIcon, ArrowUpRightIcon, FileSearchIcon, LockIcon, RefreshCwIcon } from "lucide-react"
+import { ArrowLeftIcon, ArrowUpRightIcon, FileSearchIcon, LockIcon, PencilIcon, RefreshCwIcon } from "lucide-react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
+import { useState } from "react"
 
 import { Container, Stack } from "@/components/layout/container"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -56,6 +57,7 @@ type SiteResponse = { site: Site; currentVersion: Version | null }
 
 function SiteView({ id }: { id: string }) {
   const [load, reload] = useApi<SiteResponse>(`/app-api/sites/${id}`)
+  const [editing, setEditing] = useState(false)
 
   if (load.state === "loading") return <SiteDetailSkeleton id={id} />
   if (load.state === "error") {
@@ -97,17 +99,32 @@ function SiteView({ id }: { id: string }) {
           title={<span data-testid="site-title">{site.title}</span>}
           description={site.description || undefined}
           actions={
-            currentVersion && (
-              <Button asChild variant="brand" size="lg">
-                <a href={site.url} target="_blank" rel="noreferrer" data-testid="open-site-link">
-                  Open site <ArrowUpRightIcon />
-                </a>
-              </Button>
-            )
+            <>
+              {can.edit(site.role) && !editing && (
+                <Button variant="outline" size="lg" onClick={() => setEditing(true)} data-testid="edit-details">
+                  <PencilIcon /> Edit details
+                </Button>
+              )}
+              {currentVersion && (
+                <Button asChild variant="brand" size="lg">
+                  <a href={site.url} target="_blank" rel="noreferrer" data-testid="open-site-link">
+                    Open site <ArrowUpRightIcon />
+                  </a>
+                </Button>
+              )}
+            </>
           }
         />
         <Section title="Overview" description="Where the site lives and what it serves right now.">
-          <SiteOverview site={site} currentVersion={currentVersion} onChange={reload} />
+          <SiteOverview
+            site={site}
+            currentVersion={currentVersion}
+            editing={editing}
+            onEditDone={(saved) => {
+              setEditing(false)
+              if (saved) reload()
+            }}
+          />
         </Section>
         {can.publish(site.role) && (
           <Section

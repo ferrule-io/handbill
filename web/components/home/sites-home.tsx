@@ -5,14 +5,34 @@ import Link from "next/link"
 
 import { McpEndpoint } from "@/components/home/mcp-endpoint"
 import { EmptyState } from "@/components/layout/empty-state"
-import { relativeTime, roleLabel, useApi, type Site } from "@/components/site/data"
+import { PageHeader } from "@/components/layout/page-header"
+import { relativeTime, roleLabel, useApi, type Load, type Site } from "@/components/site/data"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
-/** The signed-in user's sites: owned, managed, and shared with them. */
-export function SiteList() {
+/**
+ * Header and list of the signed-in user's sites: owned, managed, and shared
+ * with them. The MCP endpoint sits in the header once there are sites, and
+ * in the empty state before.
+ */
+export function SitesHome() {
   const [load, reload] = useApi<{ sites: Site[] }>("/app-api/sites")
+  const hasSites = load.state === "ready" && load.data.sites.length > 0
+  return (
+    <>
+      <PageHeader
+        eyebrow="Workspace"
+        title="Your sites"
+        description="Everything your agents have published, and everything shared with you."
+        actions={hasSites && <McpEndpoint className="hidden md:inline-flex" />}
+      />
+      <SiteList load={load} reload={reload} />
+    </>
+  )
+}
+
+function SiteList({ load, reload }: { load: Load<{ sites: Site[] }>; reload: () => void }) {
 
   if (load.state === "loading") {
     return (
@@ -66,7 +86,7 @@ export function SiteList() {
 }
 
 function SiteCard({ site }: { site: Site }) {
-  const host = new URL(site.url).host
+  const host = new URL(site.url).hostname
   return (
     <article className="group/site relative flex h-full min-h-44 flex-col gap-3 rounded-2xl bg-card p-5 shadow-press ring-1 ring-border transition-[box-shadow,transform] hover:-translate-y-0.5 hover:ring-foreground/20 focus-within:ring-ring">
       <div className="flex items-start justify-between gap-3">

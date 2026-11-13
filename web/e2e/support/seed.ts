@@ -54,7 +54,10 @@ export async function signIn(context: BrowserContext, baseURL: string, sessionTo
     {
       name: "__Host-session",
       value: sessionToken,
-      url: baseURL,
+      // Domain without a leading dot is host-only, as __Host- requires;
+      // Chromium rejects Secure cookies set through an http:// url.
+      domain: new URL(baseURL).hostname,
+      path: "/",
       secure: true,
       httpOnly: true,
       sameSite: "Lax",
