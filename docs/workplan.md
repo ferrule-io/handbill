@@ -615,11 +615,13 @@ As built:
   authorization requests, codes, and tokens, and of DCR clients with no
   grants.
 
-## W6 Sharing and RBAC — done except the MCP sharing tools
+## W6 Sharing and RBAC — done
 
 Owns: `internal/sharing/` (invites, ownership transfers, public links,
-membership changes), `internal/mcp/tools_sharing.go` (not yet written: it
-follows W5's MCP server), `GET /_auth/share/{token}` on the sites mux,
+membership changes), `internal/mcp/tools_sharing.go` (`list_members`,
+`share_site`, `set_member_role`, `revoke_access`, `set_public_link`,
+`transfer_ownership`; also `notify` on `publish_site` via
+`sharing.Service.NotifyUpdate`), `GET /_auth/share/{token}` on the sites mux,
 `/app-api/sites/{id}/members…`, `/app-api/invites…`, role enforcement across
 `/app-api`, MCP, and `siteserver.Authorized`; web `app/invite/`
 (`components/auth/invite-accept.tsx`), `components/site/members*.tsx`,
@@ -633,6 +635,9 @@ package sharing
 type Service struct{ /* unexported */ }
 func NewService(d *server.Deps) *Service
 func (s *Service) MailEnabled() bool
+func (s *Service) SetMailer(m mail.Sender) // test seam (mcp tests use a fake)
+// NotifyUpdate emails the other members that a new version is live (Publish role).
+func (s *Service) NotifyUpdate(ctx context.Context, siteID string, by uuid.UUID) (sent int, enabled bool, err error)
 
 // Errors: ErrNotFound (no site or no role: same answer), ErrForbidden,
 // ErrNoSuchMember, ErrAlreadyMember, ErrOwner, ErrLinkUnusable,

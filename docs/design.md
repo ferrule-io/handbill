@@ -416,8 +416,8 @@ the one-shot form of the same pipeline.
 | `get_site` | Metadata, URL, current version, public-link state, member count | manager |
 | `update_site` | Title, description | manager |
 | `delete_site` | Delete the site and its versions | owner |
-| `transfer_ownership` | Start a transfer to an email; returns the acceptance link | owner |
-| `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` (W6 adds `notify`; until then the schema rejects it) | manager |
+| `transfer_ownership` | Start a transfer to an email (`notify` emails it with SMTP); returns the acceptance link, replacing any pending transfer | owner |
+| `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` (with SMTP, emails the other members that the site was updated; `notify_result` reports what was sent, or that mail is not configured) | manager |
 | `create_deployment` | Start a staged publish (`mode: replace\|merge`); returns a deployment id | manager |
 | `upload_files` | Add files to a staged deployment | manager |
 | `get_upload_url` | Short-lived signed URL to upload a `.tar.gz`/`.zip` into a staged deployment | manager |
@@ -426,11 +426,15 @@ the one-shot form of the same pipeline.
 | `read_file` | Read one file from the current version | manager |
 | `list_versions` | Versions with timestamps and publisher | manager |
 | `rollback_site` | Make a previous version current | manager |
-| `list_members` | Members, roles, pending invites | manager |
-| `share_site` | Invite an email as viewer or manager; returns the invite link | manager (viewer), owner (manager) |
+| `list_members` | Members (user id, email, role), pending invites (invite id, email, role, expiry); never links | manager |
+| `share_site` | Invite an email as viewer or manager; always returns the invite link, plus `granted` (a verified account got access now) and `emailed` (`notify` with SMTP) | manager (viewer), owner (manager) |
 | `set_member_role` | Change a member between viewer and manager | owner |
-| `revoke_access` | Remove a member or pending invite | manager (viewers), owner (managers) |
-| `set_public_link` | `enable`, `disable`, or `rotate`; returns the link | owner |
+| `revoke_access` | Remove a member or pending invite, by user id or invite id | manager (viewers), owner (managers) |
+| `set_public_link` | `enable`, `disable`, or `rotate`; enable and rotate return the link, shown only in that result | owner |
+
+Tool annotations: `list_members` is read-only; `revoke_access`,
+`set_public_link`, and `transfer_ownership` are destructive;
+`set_member_role` is idempotent.
 
 ## Storage
 
