@@ -83,5 +83,8 @@ some access control, without the publisher keeping anything running.
 - **Database**: PostgreSQL.
 - **Helm**: bundled PostgreSQL is optional, with external database support;
   ingress is optional.
+- **Secrets at rest**: every token (sessions, OAuth, invites, public links,
+  recovery codes) is stored only as a hash.
 
-Design details: [docs/design.md](docs/design.md).
+Design details: [docs/design.md](docs/design.md). Build plan:
+[docs/roadmap.md](docs/roadmap.md).

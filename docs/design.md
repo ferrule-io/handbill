@@ -156,6 +156,26 @@ do not stop an artifact from sending credentialed requests to the app. Required:
 - Site responses send `X-Content-Type-Options: nosniff`, no CORS headers, and
   `Referrer-Policy: no-referrer` on `/_auth/*`.
 
+## Tokens and secrets
+
+No bearer secret is stored in plaintext. The plaintext exists only in the
+response that issues it.
+
+| Secret | Generated as | Stored as |
+|---|---|---|
+| Session IDs, OAuth authorization codes, access and refresh tokens, invite and ownership-transfer tokens, public-link tokens, email-verification tokens | 32 random bytes, base64url | SHA-256 of the token; looked up by hash |
+| Recovery codes | 16 base32 characters (80 bits), shown grouped | argon2id, compared per account |
+| Site tickets, site cookies, signed upload URLs | HMAC-SHA256 with `SECRET_KEY`, carrying subject, site, expiry (site cookies from a public link also carry the link generation) | Not stored |
+| Google client secret, SMTP password, storage credentials | Configuration / Kubernetes Secret | Not in the database |
+
+Consequences:
+
+- Invite, ownership-transfer, and public links are shown only when issued.
+  `get_site` and `list_members` report their state, never the link. To share
+  again, re-issue the invite or `rotate` the public link.
+- Rotating a public link bumps its generation, which invalidates cookies issued
+  from the old link without a database lookup per cookie.
+
 ## Accounts
 
 - Anyone can sign up and create sites.
