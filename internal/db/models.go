@@ -10,6 +10,16 @@ import (
 	"github.com/google/uuid"
 )
 
+type AuthFlow struct {
+	ID        uuid.UUID
+	TokenHash []byte
+	Kind      string
+	UserID    uuid.NullUUID
+	Data      []byte
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
 type Deployment struct {
 	ID          uuid.UUID
 	SiteID      string
@@ -206,6 +216,7 @@ type Session struct {
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
+	Restricted bool
 }
 
 type Site struct {

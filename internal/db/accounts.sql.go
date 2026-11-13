@@ -134,6 +134,146 @@ func (q *Queries) DisplaceUnverifiedEmailClaims(ctx context.Context, arg Displac
 	return result.RowsAffected(), nil
 }
 
+const getEmail = `-- name: GetEmail :one
+SELECT id, user_id, email, verified, is_primary, created_at, verified_at FROM emails WHERE id = $1
+`
+
+func (q *Queries) GetEmail(ctx context.Context, id uuid.UUID) (Email, error) {
+	row := q.db.QueryRow(ctx, getEmail, id)
+	var i Email
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.Verified,
+		&i.IsPrimary,
+		&i.CreatedAt,
+		&i.VerifiedAt,
+	)
+	return i, err
+}
+
+const getUserEmail = `-- name: GetUserEmail :one
+SELECT id, user_id, email, verified, is_primary, created_at, verified_at FROM emails WHERE user_id = $1 AND email = $2
+`
+
+type GetUserEmailParams struct {
+	UserID uuid.UUID
+	Email  string
+}
+
+func (q *Queries) GetUserEmail(ctx context.Context, arg GetUserEmailParams) (Email, error) {
+	row := q.db.QueryRow(ctx, getUserEmail, arg.UserID, arg.Email)
+	var i Email
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.Verified,
+		&i.IsPrimary,
+		&i.CreatedAt,
+		&i.VerifiedAt,
+	)
+	return i, err
+}
+
+const getVerifiedEmailHolder = `-- name: GetVerifiedEmailHolder :one
+SELECT user_id FROM emails WHERE email = $1 AND verified
+`
+
+func (q *Queries) GetVerifiedEmailHolder(ctx context.Context, email string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getVerifiedEmailHolder, email)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
+const hasPrimaryEmail = `-- name: HasPrimaryEmail :one
+SELECT EXISTS (SELECT 1 FROM emails WHERE user_id = $1 AND is_primary)
+`
+
+func (q *Queries) HasPrimaryEmail(ctx context.Context, userID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPrimaryEmail, userID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const listEmailClaims = `-- name: ListEmailClaims :many
+SELECT user_id, verified FROM emails WHERE email = $1
+ORDER BY verified DESC, created_at, id
+`
+
+type ListEmailClaimsRow struct {
+	UserID   uuid.UUID
+	Verified bool
+}
+
+// ListEmailClaims returns the accounts claiming an address, the verified
+// holder (if any) first, then the oldest claims.
+func (q *Queries) ListEmailClaims(ctx context.Context, email string) ([]ListEmailClaimsRow, error) {
+	rows, err := q.db.Query(ctx, listEmailClaims, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEmailClaimsRow
+	for rows.Next() {
+		var i ListEmailClaimsRow
+		if err := rows.Scan(&i.UserID, &i.Verified); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserEmails = `-- name: ListUserEmails :many
+SELECT id, user_id, email, verified, is_primary, created_at, verified_at FROM emails WHERE user_id = $1 ORDER BY is_primary DESC, created_at, id
+`
+
+func (q *Queries) ListUserEmails(ctx context.Context, userID uuid.UUID) ([]Email, error) {
+	rows, err := q.db.Query(ctx, listUserEmails, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Email
+	for rows.Next() {
+		var i Email
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Email,
+			&i.Verified,
+			&i.IsPrimary,
+			&i.CreatedAt,
+			&i.VerifiedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockUser = `-- name: LockUser :exec
+SELECT id FROM users WHERE id = $1 FOR UPDATE
+`
+
+// LockUser serializes changes to one account's sign-in methods (e.g. so two
+// concurrent removals cannot delete the last two).
+func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockUser, id)
+	return err
+}
+
 const markEmailVerified = `-- name: MarkEmailVerified :one
 UPDATE emails SET verified = true, verified_at = now()
 WHERE id = $1
