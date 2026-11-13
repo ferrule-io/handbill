@@ -20,15 +20,17 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sharing"
 	"github.com/ferrule-io/handbill/internal/sites"
 	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // Env is what tool handlers receive.
 type Env struct {
-	Deps   *server.Deps
-	Sites  *sites.Service
-	Signer *token.Signer
+	Deps    *server.Deps
+	Sites   *sites.Service
+	Signer  *token.Signer
+	Sharing *sharing.Service
 }
 
 // toolsets is appended from tools_<area>.go init functions; NewServer

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/ferrule-io/handbill/internal/db"
 	"github.com/ferrule-io/handbill/internal/mail"
 	"github.com/ferrule-io/handbill/internal/rbac"
 )
@@ -67,4 +70,45 @@ func message(to, subject, lead, action, button, link, note string) mail.Message 
 		`<p style="margin:0;color:#6b665d;font-size:13px">` + e(note) + `</p>` +
 		`</div>`
 	return mail.Message{To: to, Subject: subject, Text: text, HTML: body}
+}
+
+// NotifyUpdate emails every member of a site except the publisher that a
+// new version is live, with the site's address. by must be able to
+// publish. It returns how many messages the mail server accepted; when
+// SMTP is not configured it sends nothing and reports enabled false.
+// Members without a primary email are skipped.
+func (s *Service) NotifyUpdate(ctx context.Context, siteID string, by uuid.UUID) (sent int, enabled bool, err error) {
+	if err := s.authorizeRead(ctx, siteID, by, rbac.Publish); err != nil {
+		return 0, s.mail.Enabled(), err
+	}
+	if !s.mail.Enabled() {
+		return 0, false, nil
+	}
+	q := db.New(s.db)
+	site, err := q.GetSite(ctx, siteID)
+	if err != nil {
+		return 0, true, notFound(err, ErrNotFound)
+	}
+	rows, err := q.ListMembers(ctx, siteID)
+	if err != nil {
+		return 0, true, err
+	}
+	from, err := primaryEmail(ctx, q, by)
+	if err != nil {
+		return 0, true, err
+	}
+	link := s.cfg.SiteOrigin(siteID) + "/"
+	for _, r := range rows {
+		if r.UserID == by || r.Email == nil {
+			continue
+		}
+		lead := fmt.Sprintf("%s published a new version of “%s” on handbill.", sender(from), site.Title)
+		m := message(*r.Email, fmt.Sprintf("“%s” was updated", site.Title), lead,
+			"Open the site to see what changed:", "Open site", link,
+			"You get this because the site is shared with you.")
+		if s.send(ctx, m) {
+			sent++
+		}
+	}
+	return sent, true, nil
 }

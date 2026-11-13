@@ -7,6 +7,7 @@ import (
 
 	"github.com/ferrule-io/handbill/internal/oauth"
 	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sharing"
 	"github.com/ferrule-io/handbill/internal/sites"
 	"github.com/ferrule-io/handbill/internal/token"
 )
@@ -18,7 +19,7 @@ import (
 // principal. Responses are JSON, not SSE: the server sends no requests or
 // notifications of its own.
 func Register(r *server.Routes, d *server.Deps) error {
-	srv := NewServer(&Env{Deps: d, Sites: sites.NewService(d), Signer: token.NewSigner(d.Config.SecretKey)})
+	srv := NewServer(&Env{Deps: d, Sites: sites.NewService(d), Signer: token.NewSigner(d.Config.SecretKey), Sharing: sharing.NewService(d)})
 	h := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return srv }, &mcpsdk.StreamableHTTPOptions{
 		Stateless:                  true,
 		JSONResponse:               true,

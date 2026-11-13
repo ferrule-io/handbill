@@ -78,6 +78,10 @@ func NewService(d *server.Deps) *Service {
 // MailEnabled reports whether invites and transfers can be emailed.
 func (s *Service) MailEnabled() bool { return s.mail.Enabled() }
 
+// SetMailer replaces the SMTP sender (a test seam for packages built on
+// this service).
+func (s *Service) SetMailer(m mail.Sender) { s.mail = m }
+
 // --- Roles ------------------------------------------------------------------
 
 // authorize locks the site row (serializing membership changes per site)

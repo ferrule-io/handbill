@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +25,9 @@ Use encoding "utf8" (the default) for text files - HTML, CSS, JavaScript, SVG, J
 
 mode is required. "replace" publishes exactly the files you pass: anything not listed disappears from the site. "merge" starts from the current version, adds or overwrites the files you pass, and removes delete_paths - use it to change a few files of an existing site. delete_paths is only allowed with merge.
 
-Publishing is atomic: viewers see the old version or the new one, never a mix. Every publish is kept; list_versions and rollback_site undo a bad publish. No server-side code runs, so build interactivity with client-side JavaScript and embed or bundle any data the pages need.`
+Publishing is atomic: viewers see the old version or the new one, never a mix. Every publish is kept; list_versions and rollback_site undo a bad publish. No server-side code runs, so build interactivity with client-side JavaScript and embed or bundle any data the pages need.
+
+Set notify to email the site's other members that it was updated (useful for a recurring dashboard); it only works when the server has SMTP configured, and the result's notify_result says what happened.`
 
 const uploadURLDescription = "Get a short-lived URL for uploading a whole site as one archive into an open staged deployment - the best option for big sites, many files, or binary assets when you can run shell commands. Build the archive from the site's root directory, for example `tar -czf site.tar.gz -C dist .` or `(cd dist && zip -r ../site.zip .)`, then upload the raw file with an HTTP PUT: `curl --fail-with-body -T site.tar.gz '<upload_url>'`. Send no Authorization header: the URL itself is the credential, so do not share or log it. It expires after 15 minutes; get a new one if needed. .tar.gz and .zip are accepted (detected from the content). If every file is inside one top-level folder (as `tar -czf site.tar.gz dist/` produces), that folder is removed from the paths. Symlinks and special files are rejected. Limits: 512 MB uncompressed, 64 MB per file, 10,000 entries. You can upload more than once; later uploads overwrite earlier paths. Then call finalize_deployment."
 
@@ -33,6 +36,7 @@ type publishIn struct {
 	Mode        string      `json:"mode" jsonschema:"replace: publish exactly these files. merge: change these files on top of the current version."`
 	Files       []fileInput `json:"files" jsonschema:"The files to publish."`
 	DeletePaths []string    `json:"delete_paths,omitempty" jsonschema:"merge only: paths of the current version to remove."`
+	Notify      bool        `json:"notify,omitempty" jsonschema:"Email the site's other members that a new version is live. Default false."`
 }
 
 type versionOut struct {
@@ -46,6 +50,8 @@ type publishOut struct {
 	Site    string     `json:"site"`
 	URL     string     `json:"url"`
 	Version versionOut `json:"version"`
+	// NotifyResult is set when notify was requested.
+	NotifyResult string `json:"notify_result,omitempty"`
 }
 
 type createDeploymentIn struct {
@@ -136,7 +142,20 @@ func addPublishTools(s *mcpsdk.Server, env *Env) {
 		if err != nil {
 			return publishOut{}, err
 		}
-		return publishOut{Site: a.site.ID, URL: env.siteURL(a.site.ID), Version: toVersionOut(v)}, nil
+		out := publishOut{Site: a.site.ID, URL: env.siteURL(a.site.ID), Version: toVersionOut(v)}
+		if in.Notify {
+			sent, enabled, err := env.Sharing.NotifyUpdate(ctx, a.site.ID, a.p.UserID)
+			switch {
+			case err != nil:
+				env.Deps.Logger.Error("mcp publish_site: notify failed", "site", a.site.ID, "err", err)
+				out.NotifyResult = "published, but notifying members failed; the site is updated regardless"
+			case !enabled:
+				out.NotifyResult = "not sent: this server has no email configured; tell the members yourself"
+			default:
+				out.NotifyResult = fmt.Sprintf("emailed %d other member(s)", sent)
+			}
+		}
+		return out, nil
 	})
 
 	addTool(s, env, &mcpsdk.Tool{

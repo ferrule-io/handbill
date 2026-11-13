@@ -98,7 +98,7 @@ test("an MCP client is approved, calls tools, and is disconnected", async ({ pag
   const list = await mcp(request, tokens.access_token, "tools/list")
   expect(list.status()).toBe(200)
   const { result } = (await list.json()) as { result: { tools: { name: string }[] } }
-  expect(result.tools).toHaveLength(15)
+  expect(result.tools).toHaveLength(21)
 
   await page.goto("/settings/security")
   const grants = page.getByTestId("oauth-grants")

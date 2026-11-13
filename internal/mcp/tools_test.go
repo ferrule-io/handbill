@@ -15,20 +15,25 @@ import (
 
 	"github.com/ferrule-io/handbill/internal/oauth"
 	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sharing"
 	"github.com/ferrule-io/handbill/internal/sites"
 	"github.com/ferrule-io/handbill/internal/sites/sitestest"
 	"github.com/ferrule-io/handbill/internal/token"
 )
 
 type toolEnv struct {
-	t   *testing.T
-	d   *server.Deps
-	env *Env
+	t    *testing.T
+	d    *server.Deps
+	env  *Env
+	mail *fakeMail
 }
 
 func newToolEnv(t *testing.T) *toolEnv {
 	d := sitestest.Deps(t)
-	return &toolEnv{t: t, d: d, env: &Env{Deps: d, Sites: sites.NewService(d), Signer: token.NewSigner(d.Config.SecretKey)}}
+	sh := sharing.NewService(d)
+	fm := &fakeMail{}
+	sh.SetMailer(fm)
+	return &toolEnv{t: t, d: d, mail: fm, env: &Env{Deps: d, Sites: sites.NewService(d), Signer: token.NewSigner(d.Config.SecretKey), Sharing: sh}}
 }
 
 // session connects an in-memory client acting as user.
@@ -139,14 +144,16 @@ func TestListTools(t *testing.T) {
 		}
 	}
 	want := []string{"create_deployment", "create_site", "delete_site", "finalize_deployment", "get_site", "get_upload_url",
-		"list_files", "list_sites", "list_versions", "publish_site", "read_file", "rollback_site", "update_site", "upload_files", "whoami"}
+		"list_files", "list_members", "list_sites", "list_versions", "publish_site", "read_file", "revoke_access", "rollback_site",
+		"set_member_role", "set_public_link", "share_site", "transfer_ownership", "update_site", "upload_files", "whoami"}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
-	readOnly := map[string]bool{"whoami": true, "list_sites": true, "get_site": true, "get_upload_url": true, "list_files": true, "read_file": true, "list_versions": true}
-	destructive := map[string]bool{"delete_site": true, "publish_site": true, "finalize_deployment": true}
-	idempotent := map[string]bool{"update_site": true, "upload_files": true, "rollback_site": true}
+	readOnly := map[string]bool{"whoami": true, "list_sites": true, "get_site": true, "get_upload_url": true, "list_files": true, "read_file": true, "list_versions": true, "list_members": true}
+	destructive := map[string]bool{"delete_site": true, "publish_site": true, "finalize_deployment": true,
+		"revoke_access": true, "set_public_link": true, "transfer_ownership": true}
+	idempotent := map[string]bool{"update_site": true, "upload_files": true, "rollback_site": true, "set_member_role": true}
 	for _, tool := range res.Tools {
 		a := tool.Annotations
 		if a.ReadOnlyHint != readOnly[tool.Name] {
@@ -160,8 +167,8 @@ func TestListTools(t *testing.T) {
 	if _, isErr := call(t, cs, "list_sites", map[string]any{"bogus": 1}); !isErr {
 		t.Error("unknown argument accepted")
 	}
-	if _, isErr := call(t, cs, "publish_site", map[string]any{"site": "abcdefghijkl", "mode": "replace", "files": []any{}, "notify": true}); !isErr {
-		t.Error("notify accepted")
+	if _, isErr := call(t, cs, "publish_site", map[string]any{"site": "abcdefghijkl", "mode": "replace", "files": []any{}, "notifyy": true}); !isErr {
+		t.Error("unknown publish_site argument accepted")
 	}
 }
 

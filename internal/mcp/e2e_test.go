@@ -140,7 +140,7 @@ func TestSDKClientEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = cs.Close() })
 
 	tools, err := cs.ListTools(t.Context(), nil)
-	if err != nil || len(tools.Tools) != 15 {
+	if err != nil || len(tools.Tools) != 21 {
 		t.Fatalf("ListTools: %v %d", err, len(tools.Tools))
 	}
 	call := func(name string, args map[string]any, out any) {
