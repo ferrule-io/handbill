@@ -235,7 +235,9 @@ func (c *Client) Get(ctx context.Context, rawURL string, header http.Header) (*R
 		return nil, err
 	}
 
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+	// 304 Not Modified answers a conditional request (If-None-Match); it is
+	// returned to the caller rather than treated as a redirect.
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
 		resp.Body.Close()
 		return nil, ErrRedirect
 	}
