@@ -168,6 +168,16 @@ redirects to `/`, removing the token from the address bar. Rotating the token
 invalidates the old link and every cookie issued from it. Disabling it reverts
 the site to member-only.
 
+- The cookie carries no user and the link's generation; it lasts as long as a
+  member cookie (12 h), after which the visitor opens the link again. An
+  unknown token, another site's token, or a disabled link gets the same
+  neutral 404 page and no cookie.
+- `enable` on a link that is on is refused (its token cannot be shown again;
+  `rotate` issues a new one), `rotate` on a link that is off is refused, and
+  `disable` on one that is off is a no-op. Re-enabling a disabled link issues
+  a new token and generation, so cookies from before the disable stay dead.
+- Managers see whether the link is on; only the owner changes it.
+
 ### CSRF and CORS
 
 Site hosts are same-site with the app (`*.example.com`), so `SameSite` cookies
@@ -271,6 +281,23 @@ Consequences:
   email is verified.
 - Invites are single use, expire after `INVITE_TTL` (default 14 days), and can
   be revoked while pending.
+- Rules: inviting one of your own addresses is refused; an address whose
+  verified holder already has a role is refused (roles change with
+  `set_member_role`); re-inviting an address with a pending invite revokes
+  the old link, so only the newest works.
+- Auto-binding uses up the invite: the returned link then only leads its
+  holder to the site (accepting it again is a no-op) and works for no other
+  account.
+- Accepting never lowers a role (a manager accepting a viewer invite stays a
+  manager; the owner stays owner). Re-accepting a link the same account
+  already used is a no-op that leads to the site.
+- The invite page shows the site title, inviter, and role only to a holder of
+  a pending link, or to the account that accepted it. Signed out, it offers
+  sign-up first and sign-in second; on return it accepts without another
+  click and lands on the site page with an "Open site" call to action.
+- Removing a member or changing a role takes effect on their next request,
+  in the app and on the site host. The owner cannot be removed or demoted
+  except by a transfer.
 
 ## Roles
 
@@ -289,6 +316,13 @@ Consequences:
 - Ownership transfer targets an email and completes when the recipient accepts
   (same binding rules and `INVITE_TTL` expiry as invites). The previous owner
   becomes a manager.
+- A site has at most one pending transfer: starting another replaces it, the
+  owner can cancel it, and completing it revokes any other. Its link has the
+  invite form (`/invite#token=<token>`); the same page accepts both. The owner
+  cannot offer the site to one of their own addresses, and accepting while
+  signed in as the current owner is refused and leaves the transfer pending.
+  The swap (old owner demoted, new owner promoted, `sites.owner_id` moved) is
+  one transaction.
 
 ## Versions
 

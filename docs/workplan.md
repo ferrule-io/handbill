@@ -558,31 +558,75 @@ var toolsets []func(s *mcpsdk.Server, env *Env)
 
 Tools resolve the caller with `PrincipalFrom` and check `rbac.Can`.
 
-## W6 Sharing and RBAC
+## W6 Sharing and RBAC — done except the MCP sharing tools
 
 Owns: `internal/sharing/` (invites, ownership transfers, public links,
-membership changes), `internal/mcp/tools_sharing.go`,
-`GET /_auth/share/{token}` on the sites mux, `/app-api/sites/{id}/members…`,
-`/app-api/invites…`, role enforcement across `/app-api`, MCP, and
-`siteserver.Authorized`; web `app/invite/`, `components/site/members*.tsx`,
-`public-link.tsx`, `transfer.tsx`, and their tabs on the site page.
+membership changes), `internal/mcp/tools_sharing.go` (not yet written: it
+follows W5's MCP server), `GET /_auth/share/{token}` on the sites mux,
+`/app-api/sites/{id}/members…`, `/app-api/invites…`, role enforcement across
+`/app-api`, MCP, and `siteserver.Authorized`; web `app/invite/`
+(`components/auth/invite-accept.tsx`), `components/site/members*.tsx`,
+`public-link.tsx`, `transfer.tsx`, and their sections on the site page.
 
-Provides:
+Provides (signatures as built; `Invite` and `StartTransfer` changed from
+the original plan to return structs, and `StartTransfer` gained `notify`):
 
 ```go
 package sharing
 type Service struct{ /* unexported */ }
 func NewService(d *server.Deps) *Service
-func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email string, role rbac.Role, notify bool) (link string, err error)
+func (s *Service) MailEnabled() bool
+
+// Errors: ErrNotFound (no site or no role: same answer), ErrForbidden,
+// ErrNoSuchMember, ErrAlreadyMember, ErrOwner, ErrLinkUnusable,
+// ErrAlreadyOwner, ErrPublicLinkEnabled, ErrPublicLinkDisabled; caller
+// input errors are *sites.InputError (Msg safe to show).
+
+type Invitation struct {
+	ID uuid.UUID; Email string; Role rbac.Role; ExpiresAt time.Time
+	Link    string // APP_ORIGIN/invite#token=<token>, every time
+	Granted bool   // verified holder got the role now (link already used up for them)
+	Emailed bool
+}
+func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email string, role rbac.Role, notify bool) (Invitation, error)
+// Accept redeems an invite or a transfer link (one token namespace).
 func (s *Service) Accept(ctx context.Context, token string, user identity.User) (siteID string, err error)
+func (s *Service) Lookup(ctx context.Context, token string, user uuid.UUID) (Pending, error) // for the invite page
+func (s *Service) Members(ctx context.Context, siteID string, by uuid.UUID) ([]Member, []PendingInvite, error)
 func (s *Service) Revoke(ctx context.Context, siteID string, by uuid.UUID, memberOrInvite uuid.UUID) error
 func (s *Service) SetRole(ctx context.Context, siteID string, by, member uuid.UUID, role rbac.Role) error
-func (s *Service) SetPublicLink(ctx context.Context, siteID string, by uuid.UUID, op string) (link string, err error) // enable|disable|rotate
-func (s *Service) StartTransfer(ctx context.Context, siteID string, by uuid.UUID, email string) (link string, err error)
+const LinkEnable, LinkDisable, LinkRotate = "enable", "disable", "rotate"
+func (s *Service) SetPublicLink(ctx context.Context, siteID string, by uuid.UUID, op string) (link string, err error)
+func (s *Service) PublicLinkState(ctx context.Context, siteID string, by uuid.UUID) (PublicLink, error)
+type Transfer struct { Email string; CreatedAt, ExpiresAt time.Time; Link string; Emailed bool }
+func (s *Service) StartTransfer(ctx context.Context, siteID string, by uuid.UUID, email string, notify bool) (Transfer, error)
+func (s *Service) PendingTransfer(ctx context.Context, siteID string, by uuid.UUID) (*Transfer, error)
+func (s *Service) CancelTransfer(ctx context.Context, siteID string, by uuid.UUID) error
 ```
 
-Verified-email auto-binding happens in `Invite`: an existing account whose
-matching email is verified gets the grant immediately.
+Every method takes the caller (`by`) and checks `rbac.Can` itself, so the
+MCP tools map one-to-one: `list_members` → `Members`, `share_site` →
+`Invite`, `set_member_role` → `SetRole`, `revoke_access` → `Revoke`,
+`set_public_link` → `SetPublicLink`, `transfer_ownership` →
+`StartTransfer`; map the errors above to tool errors. Mutations lock the
+site row, serializing membership changes per site. Behavior decided here is
+in design.md (Sharing, Roles, Public links).
+
+- App API (`sharing.Register`, `cmd/agent-dash/module_sharing.go`):
+  `GET|POST /app-api/sites/{id}/members`, `PATCH|DELETE
+  /app-api/sites/{id}/members/{member}` (member user id or invite id),
+  `GET|POST /app-api/sites/{id}/public-link` (`{op}`), `GET|POST|DELETE
+  /app-api/sites/{id}/transfer`, `POST /app-api/invites/lookup` (public)
+  and `POST /app-api/invites/accept`, tokens in JSON bodies only. Listings
+  never return token plaintext; links appear only in the issuing response.
+- `siteserver`: `GET /_auth/share/{token}` (sets the public cookie,
+  `LinkGen` = generation, redirect to `/`); `Authorized` needed no change,
+  since `sites.Access` already loads the link state on every request.
+- Queries in `queries/sharing.sql`; no migration (the step-2 schema had
+  every table).
+- Tests: `internal/sharing` (service and HTTP: every roles-table row per
+  role, links, races, transfers, the share route); e2e
+  `web/e2e/sharing.spec.ts`.
 
 ## W7 UI polish
 
