@@ -123,10 +123,12 @@ with the app or with each other (URL option B).
 | `/auth/google/callback` | Google OIDC callback |
 | `/auth/site` | Issues site tickets (handoff below) |
 | `/settings/security` | Passkeys, linked Google identity, recovery codes, OAuth grants |
+| `/consent?request=<id>` | OAuth consent screen; `?error=<code>` when a request can't continue |
 | `/mcp` | MCP endpoint (OAuth bearer tokens only) |
-| `/.well-known/oauth-protected-resource` | Protected resource metadata for `/mcp` |
+| `/.well-known/oauth-protected-resource/mcp` | Protected resource metadata for `/mcp` (the URL `WWW-Authenticate` points to); the root `/.well-known/oauth-protected-resource` serves the same document |
 | `/.well-known/oauth-authorization-server` | AS metadata, `client_id_metadata_document_supported: true` |
 | `/oauth/authorize`, `/oauth/token` | OAuth 2.1 |
+| `/oauth/revoke` | Token revocation (RFC 7009) |
 | `/oauth/register` | Dynamic Client Registration; only when `OAUTH_DCR_ENABLED=true` |
 | `/api/deployments/<id>/archive` | Archive upload target returned by `get_upload_url` |
 | `/app-api/*` | JSON endpoints for the UI only (session cookie + CSRF) |
@@ -193,8 +195,9 @@ do not stop an artifact from sending credentialed requests to the app. Required:
   cannot start ceremonies or sign the viewer out. `appapi` also requires
   `Content-Type: application/json` for request bodies.
 - Non-cookie endpoints are exempt from the Origin/CSRF check and never accept
-  the session cookie: `/mcp` (bearer token), `/oauth/token` (PKCE/client
-  authentication), and `/api/deployments/<id>/archive` (signed short-lived URL).
+  the session cookie: `/mcp` (bearer token), `/oauth/token` and `/oauth/revoke`
+  (PKCE/client authentication), and `/api/deployments/<id>/archive` (signed
+  short-lived URL).
 - No CORS response ever allows a site origin; credentialed CORS is limited to
   `APP_ORIGIN`.
 - Site responses send `X-Content-Type-Options: nosniff`, no CORS headers, and
@@ -207,7 +210,7 @@ response that issues it.
 
 | Secret | Generated as | Stored as |
 |---|---|---|
-| Session IDs, site tickets, OAuth authorization codes, access and refresh tokens, invite and ownership-transfer tokens, public-link tokens, email-verification tokens | 32 random bytes, base64url | SHA-256 of the token; looked up by hash. Single-use tokens (tickets, authorization codes, invites, transfers, verification) are consumed atomically. |
+| Session IDs, site tickets, OAuth authorization request handles, OAuth authorization codes, access and refresh tokens, invite and ownership-transfer tokens, public-link tokens, email-verification tokens | 32 random bytes, base64url | SHA-256 of the token; looked up by hash. Single-use tokens (tickets, authorization request handles, authorization codes, invites, transfers, verification) are consumed atomically. |
 | Recovery codes | 16 base32 characters (80 bits), shown grouped | argon2id, compared per account; consumed atomically |
 | Site cookies, signed upload URLs | HMAC-SHA256 with `SECRET_KEY`, carrying subject, site, expiry (site cookies from a public link also carry the link generation) | Not stored; validity also requires the current database state (role or link generation for cookies, an open deployment for upload URLs) |
 | Google client secret, SMTP password, storage credentials | Configuration / Kubernetes Secret | Not in the database |
@@ -368,21 +371,38 @@ the one-shot form of the same pipeline.
 
 ## MCP authorization
 
-- OAuth 2.1 per the MCP authorization spec (2025-11-25), with PKCE (S256) and
-  resource indicators binding tokens to `APP_ORIGIN/mcp`.
+- OAuth 2.1 per the MCP authorization spec (2025-11-25), plus the 2026-07-28
+  server requirements: `iss` on every authorization response (RFC 9207) with
+  `authorization_response_iss_parameter_supported: true`, and refresh tokens
+  rotated on every use. CIMD per draft-ietf-oauth-client-id-metadata-document-03.
+  PKCE (S256) is required, and resource indicators bind tokens to
+  `APP_ORIGIN/mcp`. agent-dash defines no scopes (`offline_access` is accepted
+  and recorded, with no effect).
 - Client registration via Client ID Metadata Documents (CIMD): the
   `client_id` is an HTTPS URL to the client's metadata JSON.
-- Dynamic Client Registration (RFC 7591) is off by default. With
-  `OAUTH_DCR_ENABLED=true`, `/oauth/register` is served and advertised as
-  `registration_endpoint` in AS metadata. Registration is unauthenticated, so it
-  is rate-limited, accepts only `https` or loopback `http` redirect URIs, and the
-  consent screen labels DCR clients as unverified.
+- Dynamic Client Registration (RFC 7591), which MCP 2026-07-28 deprecates in
+  favor of CIMD, is off by default. With `OAUTH_DCR_ENABLED=true`,
+  `/oauth/register` is served and advertised as `registration_endpoint` in AS
+  metadata. Registration is unauthenticated; the consent screen labels DCR
+  clients as unverified. Rate limiting it (and `/oauth/authorize`, which
+  triggers CIMD fetches, and `/oauth/token`) is W9's.
+- Redirect URIs, for CIMD and DCR alike, are absolute, without fragment or
+  userinfo, and either `https` or loopback `http` (`127.0.0.1`, `[::1]`,
+  `localhost`). A loopback registration matches any port (RFC 8252 §7.3):
+  Claude Code registers `http://localhost/callback` and sends a random port.
+  Everything else must match byte for byte.
 - CIMD fetching is an SSRF surface: HTTPS only, resolve and reject private,
-  loopback, and link-local addresses, short timeout, response size cap, no
-  redirects to disallowed hosts, cache per HTTP headers. Verify the document's
-  `client_id` equals its URL and that the requested `redirect_uri` is listed.
-- The consent screen shows the client name and the `client_id` host.
-- Users review and revoke OAuth grants in `/settings/security`.
+  loopback, and link-local addresses, short timeout, 5 KiB response cap, no
+  redirects (any 3xx is an error; CIMD-03 §6), cache per HTTP headers
+  (clamped to 5 min–24 h, revalidated with `If-None-Match`). Verify the
+  document's `client_id` equals its URL and that the requested `redirect_uri`
+  is listed.
+- The consent screen is always shown. It shows the client name, the
+  `client_id` host, and the redirect URI's host; it warns when the redirect
+  goes to a program on this computer (loopback) and labels DCR clients as
+  unverified.
+- Users review and revoke OAuth grants in `/settings/security`; clients
+  revoke tokens at `/oauth/revoke` (RFC 7009).
 
 ## MCP tools
 
@@ -397,7 +417,7 @@ the one-shot form of the same pipeline.
 | `update_site` | Title, description | manager |
 | `delete_site` | Delete the site and its versions | owner |
 | `transfer_ownership` | Start a transfer to an email; returns the acceptance link | owner |
-| `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` | manager |
+| `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` (W6 adds `notify`; until then the schema rejects it) | manager |
 | `create_deployment` | Start a staged publish (`mode: replace\|merge`); returns a deployment id | manager |
 | `upload_files` | Add files to a staged deployment | manager |
 | `get_upload_url` | Short-lived signed URL to upload a `.tar.gz`/`.zip` into a staged deployment | manager |

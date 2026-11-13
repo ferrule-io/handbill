@@ -171,7 +171,10 @@ the spec in the same change.
 
 Owns: `deploy/helm/agent-dash/` and its install docs. Consumes the
 configuration and runtime contract in design.md#configuration (env vars,
-port 8080, UID/GID 65532, `/data`, probes on any `Host`).
+port 8080, UID/GID 65532, `/data`, probes on any `Host`). `publish_site`
+bodies (up to 16 MiB) and archive uploads (up to 512 MiB) exceed common
+ingress body limits (ingress-nginx: 1 MiB): the app host's ingress needs a
+body-size annotation (see the chart README).
 
 ## W2a Schema, migrations, queries, token helpers — done
 
@@ -525,38 +528,92 @@ Additions beyond the signatures above (all additive):
   and formatting helpers; W6 adds its site-page sections to
   `components/site/site-detail.tsx`.
 
-## W5 OAuth 2.1 authorization server and `/mcp`
+## W5 OAuth 2.1 authorization server and `/mcp` — done
 
 Owns: `internal/oauth/` (metadata, authorize, consent, token, refresh,
-CIMD fetcher with SSRF guards, DCR), `internal/mcp/` (server, site and
-content tools), `internal/upload/` (`/api/deployments/{id}/archive`); web
-`app/consent/` (new fixed route `/consent?request=<id>`: `/oauth/authorize`
-validates the request and redirects there; the page POSTs the decision to
-`/app-api/oauth/consent`), `components/settings/oauth-grants.tsx` (mounted in
-W3's security page).
+revocation, CIMD fetcher with SSRF guards, DCR, grants), `internal/mcp/`
+(server, site and content tools), `internal/upload/`
+(`/api/deployments/{id}/archive`); web `app/consent/` (new fixed route
+`/consent?request=<id>`: `/oauth/authorize` validates the request and
+redirects there; the page POSTs the decision to `/app-api/oauth/consent`),
+`components/consent/*`, `components/settings/oauth-grants.tsx` (mounted in
+W3's security page; the shared `Row` helpers moved to
+`components/settings/row.tsx`). Plan: `docs/plans/w5-oauth-mcp.md`.
 
 Provides:
 
 ```go
 package oauth
-type Principal struct { UserID uuid.UUID; ClientID string; Scopes []string }
-// RequireBearer validates an access token bound to APP_ORIGIN/mcp, or
-// answers 401 with WWW-Authenticate resource_metadata.
+type Principal struct {
+	UserID        uuid.UUID
+	Email         string // primary; "" if none
+	EmailVerified bool
+	ClientID      string // CIMD URL or DCR id
+	ClientName    string
+	GrantID       uuid.UUID
+	Scopes        []string // at most offline_access; no effect
+}
+// RequireBearer validates an access token bound to APP_ORIGIN/mcp (and
+// overwrites identity.User with its user), or answers 401 with
+// WWW-Authenticate resource_metadata.
 func RequireBearer(d *server.Deps, next http.Handler) http.Handler
 func PrincipalFrom(ctx context.Context) (Principal, bool)
+func WithPrincipal(ctx context.Context, p Principal) context.Context // tests
+func Issuer(c *config.Config) string              // APP_ORIGIN
+func Resource(c *config.Config) string            // APP_ORIGIN + "/mcp"
+func ResourceMetadataURL(c *config.Config) string // path-suffixed PRM
+// Register uses production options; tests pass a CIMD client trusting a
+// fake TLS host and a clock.
+type Options struct { CIMD *safehttp.Client; Now func() time.Time }
+func Module(o Options) server.Module
+var Register = Module(Options{})
+
+package upload
+const GrantTTL = 15 * time.Minute
+func URL(c *config.Config, s *token.Signer, g token.UploadGrant) string
 ```
 
-MCP tools register per file inside `internal/mcp`, the same way modules do:
+MCP tools register per file inside `internal/mcp`, the same way modules do
+(see the package comment in `internal/mcp/server.go`):
 
 ```go
 package mcp
 // Env is what tool handlers receive.
-type Env struct { Deps *server.Deps; Sites *sites.Service }
+type Env struct { Deps *server.Deps; Sites *sites.Service; Signer *token.Signer }
 // toolsets is appended from tools_<area>.go init functions.
 var toolsets []func(s *mcpsdk.Server, env *Env)
+func NewServer(env *Env) *mcpsdk.Server
 ```
 
-Tools resolve the caller with `PrincipalFrom` and check `rbac.Can`.
+A new `tools_<area>.go` adds `func init() { toolsets = append(toolsets,
+add<Area>Tools) }` and registers tools with `addTool(s, env, &mcpsdk.Tool{...},
+schemaPatch, handler)`: typed input/output structs (snake_case JSON; unknown
+arguments rejected), `Annotations` from `readOnly(title)` or
+`mutating(title, destructive, idempotent)`. Handlers check the caller with
+`env.site(ctx, tool, siteID, action)` (principal, role, and `rbac.Can`, with
+the standard not-found and role messages) or `principal(ctx)`, and return
+`toolErrorf` messages for the model; other errors are logged and reported as
+`internal error, try again`. Tests use `NewServer` with the SDK's in-memory
+transports and `oauth.WithPrincipal` (`tools_test.go`).
+
+As built:
+
+- Schema: migration `oauth_requests` adds `oauth_authorization_requests`;
+  queries in `queries/oauth.sql` and `queries/mcp.sql`.
+- `sites` gained `Deployment` and `GetDeployment` (additive, W4's package);
+  `safehttp` returns `304 Not Modified` to the caller instead of
+  `ErrRedirect`, for CIMD revalidation.
+- `/mcp` is the SDK's stateless Streamable HTTP handler with JSON responses
+  and its localhost protection off; `internal/mcp` checks `Origin` itself.
+- `publish_site` has no `notify` yet: W6 adds it to the schema.
+- Claude Code refuses plain-`http` token endpoints unless the host is
+  literally `localhost`, `127.0.0.1`, or `::1`, so manual tests run with
+  `APP_ORIGIN=http://localhost:<port>` (the mise default stays
+  `dash.localhost` for passkeys and e2e).
+- Left to W9: rate limiting `/oauth/register`, `/oauth/authorize` (it
+  triggers outbound CIMD fetches), and `/oauth/token`; GC of expired
+  authorization requests, codes, and tokens, and of DCR clients with no
+  grants.
 
 ## W6 Sharing and RBAC — done except the MCP sharing tools
 
@@ -640,3 +697,6 @@ Owns: limits and rate limiting (`internal/ratelimit`, applied with
 `UseApp`/`UseSites` or per route), metrics, security review fixes in any
 package (coordinated with that package's owner), blob GC, backup notes,
 multi-arch image and chart release workflows.
+Also: rate limits on `/oauth/register`, `/oauth/authorize`, and
+`/oauth/token`; GC of expired OAuth authorization requests, codes, and
+tokens, and of DCR clients without grants (W5 left both here).
