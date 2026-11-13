@@ -35,7 +35,7 @@ WHERE id = @id AND registration = 'cimd';
 
 -- name: CreateDCRClient :one
 INSERT INTO oauth_clients (id, client_id, registration, metadata, client_name, redirect_uris, token_endpoint_auth_method)
-VALUES (@id, @id::text, 'dcr', @metadata, @client_name, @redirect_uris, 'none')
+VALUES (@id, CAST(@id AS uuid)::text, 'dcr', @metadata, @client_name, @redirect_uris, 'none')
 RETURNING *;
 
 -- name: DeleteClientGrants :execrows

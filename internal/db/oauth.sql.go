@@ -177,7 +177,7 @@ func (q *Queries) CreateAuthorizationRequest(ctx context.Context, arg CreateAuth
 
 const createDCRClient = `-- name: CreateDCRClient :one
 INSERT INTO oauth_clients (id, client_id, registration, metadata, client_name, redirect_uris, token_endpoint_auth_method)
-VALUES ($1, $1::text, 'dcr', $2, $3, $4, 'none')
+VALUES ($1, CAST($1 AS uuid)::text, 'dcr', $2, $3, $4, 'none')
 RETURNING id, client_id, registration, metadata, client_name, redirect_uris, token_endpoint_auth_method, client_secret_hash, fetched_at, cache_expires_at, etag, last_modified, created_at, updated_at
 `
 
