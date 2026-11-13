@@ -141,6 +141,35 @@ func TestPositivePathWithTLSServer(t *testing.T) {
 	}
 }
 
+func TestNotModifiedReturned(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") != `"v1"` {
+			http.Error(w, "missing If-None-Match", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("ETag", `"v1"`)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer ts.Close()
+
+	client := New(Options{AllowLoopback: true, TLSClientConfig: ts.Client().Transport.(*http.Transport).TLSClientConfig})
+	hdr := make(http.Header)
+	hdr.Set("If-None-Match", `"v1"`)
+	resp, err := client.Get(context.Background(), ts.URL, hdr)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotModified {
+		t.Fatalf("expected status 304, got %d", resp.StatusCode)
+	}
+	if len(resp.Body) != 0 {
+		t.Fatalf("expected empty body, got %q", resp.Body)
+	}
+	if resp.Header.Get("ETag") != `"v1"` {
+		t.Fatalf("expected ETag, got %q", resp.Header.Get("ETag"))
+	}
+}
+
 func TestLoopbackBlockedByDefault(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
