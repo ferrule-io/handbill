@@ -100,13 +100,13 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: agentdash
-          POSTGRES_PASSWORD: agentdash
-          POSTGRES_DB: agentdash
+          POSTGRES_USER: handbill
+          POSTGRES_PASSWORD: handbill
+          POSTGRES_DB: handbill
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U agentdash -d agentdash"
+          --health-cmd "pg_isready -U handbill -d handbill"
           --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@v5
@@ -115,7 +115,7 @@ jobs:
         with:
           context: .
           load: true
-          tags: agent-dash:ci
+          tags: handbill:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Start container
@@ -124,18 +124,18 @@ jobs:
         # where the container's local storage reads and writes them.
         run: |
           mkdir -p "$RUNNER_TEMP/data"
-          docker run -d --name agent-dash --network host \
+          docker run -d --name handbill --network host \
             --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/data:/data" \
             -e APP_ORIGIN=http://dash.localhost:8080 \
             -e SITES_DOMAIN=sites.localhost \
             -e SECRET_KEY="$(openssl rand -base64 48)" \
-            -e DATABASE_URL='postgres://agentdash:agentdash@127.0.0.1:5432/agentdash?sslmode=disable' \
-            agent-dash:ci
+            -e DATABASE_URL='postgres://handbill:handbill@127.0.0.1:5432/handbill?sslmode=disable' \
+            handbill:ci
           for _ in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8080/healthz && exit 0
             sleep 1
           done
-          docker logs agent-dash
+          docker logs handbill
           exit 1
       - uses: pnpm/action-setup@v4
         with:
@@ -154,7 +154,7 @@ jobs:
           BASE_URL: http://dash.localhost:8080
           SITES_DOMAIN: sites.localhost
           # The seeder uses the container's database and storage.
-          DATABASE_URL: postgres://agentdash:agentdash@127.0.0.1:5432/agentdash?sslmode=disable
+          DATABASE_URL: postgres://handbill:handbill@127.0.0.1:5432/handbill?sslmode=disable
           STORAGE_TYPE: local
           STORAGE_LOCAL_DIR: ${{ runner.temp }}/data
         run: |
@@ -163,4 +163,4 @@ jobs:
           pnpm test:e2e
       - name: Container logs
         if: failure()
-        run: docker logs agent-dash
+        run: docker logs handbill

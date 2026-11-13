@@ -21,15 +21,16 @@ COPY internal/ internal/
 COPY --from=web /src/web/out/ internal/webui/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/agent-dash ./cmd/agent-dash
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/handbill ./cmd/handbill
 # Local storage root, owned by the distroless nonroot user (65532).
 RUN mkdir -p /out/data
 
 # 3. Runtime: distroless static, non-root.
 FROM gcr.io/distroless/static-debian13:nonroot
-COPY --from=server /out/agent-dash /agent-dash
+LABEL org.opencontainers.image.source=https://github.com/ferrule-io/handbill
+COPY --from=server /out/handbill /handbill
 COPY --from=server --chown=65532:65532 /out/data /data
 USER 65532:65532
 EXPOSE 8080
 VOLUME ["/data"]
-ENTRYPOINT ["/agent-dash"]
+ENTRYPOINT ["/handbill"]

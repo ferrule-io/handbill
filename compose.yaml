@@ -1,18 +1,19 @@
+name: handbill
 # Local dependencies for development. The server itself runs on the host
 # (`make run`); see mise.toml for the matching environment.
 services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_USER: agentdash
-      POSTGRES_PASSWORD: agentdash
-      POSTGRES_DB: agentdash
+      POSTGRES_USER: handbill
+      POSTGRES_PASSWORD: handbill
+      POSTGRES_DB: handbill
     ports:
       - "127.0.0.1:55432:5432"
     volumes:
       - postgres:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentdash -d agentdash"]
+      test: ["CMD-SHELL", "pg_isready -U handbill -d handbill"]
       interval: 2s
       timeout: 3s
       retries: 30

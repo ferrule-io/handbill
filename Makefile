@@ -1,8 +1,8 @@
-# agent-dash developer tasks. Tool versions come from mise.toml (`mise install`);
+# handbill developer tasks. Tool versions come from mise.toml (`mise install`);
 # dev environment variables come from mise.toml's [env].
 
 WEB_DIST := internal/webui/dist
-IMAGE    ?= agent-dash:dev
+IMAGE    ?= handbill:dev
 
 .PHONY: all web build run db-up db-down test vet lint web-lint web-typecheck e2e docker clean kind-smoke
 
@@ -16,11 +16,11 @@ web:
 
 ## build: compile the server (embeds whatever is in internal/webui/dist)
 build:
-	CGO_ENABLED=0 go build -trimpath -o bin/agent-dash ./cmd/agent-dash
+	CGO_ENABLED=0 go build -trimpath -o bin/handbill ./cmd/handbill
 
 ## run: build everything and start the server against the Compose database
 run: web build db-up
-	./bin/agent-dash
+	./bin/handbill
 
 db-up:
 	docker compose up -d --wait postgres
