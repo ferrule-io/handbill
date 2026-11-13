@@ -86,6 +86,25 @@ func (s *Service) openDeployment(ctx context.Context, id uuid.UUID) (db.Deployme
 	return d, nil
 }
 
+// Deployment is a staged publish's state.
+type Deployment struct {
+	ID        uuid.UUID
+	SiteID    string
+	Mode      Mode
+	State     string // "open" | "finalized" | "abandoned"
+	CreatedBy uuid.NullUUID
+	CreatedAt time.Time
+}
+
+// GetDeployment returns a deployment in any state, or ErrNotFound.
+func (s *Service) GetDeployment(ctx context.Context, id uuid.UUID) (Deployment, error) {
+	d, err := db.New(s.db).GetDeployment(ctx, id)
+	if err != nil {
+		return Deployment{}, notFound(err)
+	}
+	return Deployment{ID: d.ID, SiteID: d.SiteID, Mode: Mode(d.Mode), State: d.State, CreatedBy: d.CreatedBy, CreatedAt: d.CreatedAt}, nil
+}
+
 // AddFiles stores the files' blobs and adds them to an open deployment,
 // replacing earlier additions or deletions of the same paths. Within one
 // call a repeated path keeps its last occurrence.
