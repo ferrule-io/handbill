@@ -42,10 +42,11 @@ passes with IDs chosen at runtime.
 
 - Schema and `goose` migrations: users, emails, passkey credentials, Google
   identities, sessions, recovery codes, sites, versions, version files,
-  deployments, memberships, invites, ownership transfers, public links, OAuth
-  clients, authorization codes, access/refresh tokens.
-- `sqlc` queries; token hashing helpers (SHA-256 lookup tokens, argon2id
-  recovery codes, HMAC-signed tickets/cookies).
+  deployments, memberships, invites, ownership transfers, public links, site
+  tickets, OAuth clients, authorization codes, access/refresh tokens.
+- `sqlc` queries; token helpers (SHA-256 lookup tokens with atomic consumption
+  for single-use ones, argon2id recovery codes, HMAC-signed site cookies and
+  upload URLs).
 - Storage adapter interface plus local, S3, and GCS implementations, sharing
   one contract test suite (MinIO and fake-gcs-server in CI).
 

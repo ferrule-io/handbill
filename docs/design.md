@@ -125,11 +125,14 @@ receive it.
    cookie redirects to `https://dash.example.com/auth/site?site=<id>&return=<path>`.
 2. The app requires a session (sign-in/sign-up if needed) and the viewer role,
    then redirects to `https://<id>.sites.example.com/_auth/callback?ticket=<t>`.
-   The ticket is signed, bound to the site id and user, valid ~60 s, single use.
+   The ticket is a random token bound to the site id and user, valid ~60 s,
+   single use (stored hashed and consumed atomically on redemption).
 3. The site host redeems the ticket, sets `__Host-site` (Secure, HttpOnly,
    SameSite=Lax, Path=/, host-only), and redirects to `<path>`.
 
-Each site request re-checks the role so revocation takes effect immediately.
+Each site request loads the site's access state (current version, membership,
+public-link enabled flag and generation) and re-checks the cookie against it,
+so revocation, disabling, and rotation take effect on the next request.
 
 ### Public links
 
@@ -163,9 +166,9 @@ response that issues it.
 
 | Secret | Generated as | Stored as |
 |---|---|---|
-| Session IDs, OAuth authorization codes, access and refresh tokens, invite and ownership-transfer tokens, public-link tokens, email-verification tokens | 32 random bytes, base64url | SHA-256 of the token; looked up by hash |
-| Recovery codes | 16 base32 characters (80 bits), shown grouped | argon2id, compared per account |
-| Site tickets, site cookies, signed upload URLs | HMAC-SHA256 with `SECRET_KEY`, carrying subject, site, expiry (site cookies from a public link also carry the link generation) | Not stored |
+| Session IDs, site tickets, OAuth authorization codes, access and refresh tokens, invite and ownership-transfer tokens, public-link tokens, email-verification tokens | 32 random bytes, base64url | SHA-256 of the token; looked up by hash. Single-use tokens (tickets, authorization codes, invites, transfers, verification) are consumed atomically. |
+| Recovery codes | 16 base32 characters (80 bits), shown grouped | argon2id, compared per account; consumed atomically |
+| Site cookies, signed upload URLs | HMAC-SHA256 with `SECRET_KEY`, carrying subject, site, expiry (site cookies from a public link also carry the link generation) | Not stored; validity also requires the current database state (role or link generation for cookies, an open deployment for upload URLs) |
 | Google client secret, SMTP password, storage credentials | Configuration / Kubernetes Secret | Not in the database |
 
 Consequences:
@@ -173,8 +176,9 @@ Consequences:
 - Invite, ownership-transfer, and public links are shown only when issued.
   `get_site` and `list_members` report their state, never the link. To share
   again, re-issue the invite or `rotate` the public link.
-- Rotating a public link bumps its generation, which invalidates cookies issued
-  from the old link without a database lookup per cookie.
+- Rotating a public link bumps its generation. The per-request site lookup
+  compares the cookie's generation with the current one, so cookies from the
+  old link stop working immediately.
 
 ## Accounts
 
