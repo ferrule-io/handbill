@@ -49,26 +49,36 @@ some access control, without the publisher keeping anything running.
 - **Accounts**: identified by email. No passwords — sign-in is passkey or SSO.
   Google is the only SSO provider to start.
 - **Sign-up**: zero barrier to entry — a viewer opening a shared link should be
-  able to create an account and see the site in one or two steps.
+  able to create an account and see the site in one or two steps. Anyone can
+  sign up and create sites. Accepted risk: an internet-facing instance can be
+  used to host arbitrary content (including phishing) under the operator's domain.
 - **Account recovery**: recovery codes are generated and shown once at sign-up.
 - **Notifications**: SMTP is optional and configurable; when set, the server
   sends notification emails. Everything must work without it.
 - **Sites**: each account can own and manage several sites, created and
   updated through the MCP endpoint.
-- **Roles**: per-site roles include at least owner, manager (can publish and
-  update the site), and viewer.
+- **Roles**: per-site owner, manager, and viewer. Managers publish and manage
+  viewers; only the owner manages managers, the public link, deletion, and can
+  transfer ownership.
+- **Sharing**: invites always produce a link; a grant binds to the account that
+  accepts it, and binds by email only to verified emails.
+- **Public links**: optional per-site "anyone with the link" access.
 - **Lifecycle**: sites are updatable in place; an update keeps the same URL so
-  viewers (e.g. a daily dashboard) see the new content. No expiration for now.
-- **Publishing interface**: the server exposes an MCP endpoint at `/mcp`.
+  viewers (e.g. a daily dashboard) see the new content. Every publish is a
+  retained version with rollback. No expiration for now.
+- **Publishing interface**: the server exposes an MCP endpoint at `/mcp`,
+  authorized with OAuth 2.1 using Client ID Metadata Documents.
+- **URLs**: app on its own host; each site on a random subdomain under a
+  dedicated sites domain (`<site-id>.sites.example.com`).
 - **Storage**: pluggable adapter with S3, GCS, and local filesystem
   implementations.
 
 ## Open questions
 
-- How MCP clients authenticate to `/mcp` as a user (OAuth flow, personal
-  access tokens, or both)?
-- URL structure for the app, `/mcp`, and hosted site content.
-- Do updates retain previous versions, or overwrite?
+- Do the target MCP clients (Claude Code, Claude Desktop, claude.ai) support
+  CIMD? If not, a Dynamic Client Registration fallback is needed.
 - Are other publish interfaces (HTTP API, CLI) needed besides MCP?
-- Who may sign up and create sites on an instance (open, invite-only, allowlist)?
-- Exact permissions of manager vs owner (e.g. can managers add managers?).
+- Should pending invites and ownership transfers expire?
+- Version retention limit, if any.
+
+Design details: [docs/design.md](docs/design.md).
