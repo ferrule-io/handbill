@@ -53,12 +53,12 @@ func newFakeResolver(t *testing.T, hostMap map[string][]netip.Addr) *net.Resolve
 			qEnd += 4 // skip QTYPE and QCLASS
 
 			resp := make([]byte, 0, 512)
-			resp = append(resp, req[0], req[1]) // ID
-			resp = append(resp, 0x81, 0x80)     // Flags: standard response, no error
-			resp = append(resp, 0x00, 0x01)     // QDCOUNT: 1
-			resp = append(resp, 0x00, 0x00)     // ANCOUNT (updated below)
-			resp = append(resp, 0x00, 0x00)     // NSCOUNT: 0
-			resp = append(resp, 0x00, 0x00)     // ARCOUNT: 0
+			resp = append(resp, req[0], req[1])  // ID
+			resp = append(resp, 0x81, 0x80)      // Flags: standard response, no error
+			resp = append(resp, 0x00, 0x01)      // QDCOUNT: 1
+			resp = append(resp, 0x00, 0x00)      // ANCOUNT (updated below)
+			resp = append(resp, 0x00, 0x00)      // NSCOUNT: 0
+			resp = append(resp, 0x00, 0x00)      // ARCOUNT: 0
 			resp = append(resp, req[12:qEnd]...) // Question section
 
 			addrs := hostMap[qName]

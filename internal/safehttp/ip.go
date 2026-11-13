@@ -24,19 +24,19 @@ var (
 	prefixBroadcast4 = netip.MustParsePrefix("255.255.255.255/32") // RFC 919 Limited Broadcast
 
 	// IPv6 blocked prefixes
-	prefixDiscard6   = netip.MustParsePrefix("100::/64")           // RFC 6666 Discard-Only Address Block
-	prefixBench6     = netip.MustParsePrefix("2001:2::/48")        // RFC 5180 BMWG IPv6 Benchmarking
-	prefixDoc6       = netip.MustParsePrefix("2001:db8::/32")      // RFC 3849 Documentation
-	prefix6to4       = netip.MustParsePrefix("2002::/16")          // RFC 3056 6to4 (embeds v4)
-	prefixULA6       = netip.MustParsePrefix("fc00::/7")           // RFC 4193 Unique Local Address
-	prefixLinkLocal6 = netip.MustParsePrefix("fe80::/10")          // RFC 4291 Link-Local Unicast
-	prefixSiteLocal6 = netip.MustParsePrefix("fec0::/10")          // RFC 3879 Site-Local (deprecated)
-	prefixMulticast6 = netip.MustParsePrefix("ff00::/8")           // RFC 4291 Multicast
+	prefixDiscard6   = netip.MustParsePrefix("100::/64")      // RFC 6666 Discard-Only Address Block
+	prefixBench6     = netip.MustParsePrefix("2001:2::/48")   // RFC 5180 BMWG IPv6 Benchmarking
+	prefixDoc6       = netip.MustParsePrefix("2001:db8::/32") // RFC 3849 Documentation
+	prefix6to4       = netip.MustParsePrefix("2002::/16")     // RFC 3056 6to4 (embeds v4)
+	prefixULA6       = netip.MustParsePrefix("fc00::/7")      // RFC 4193 Unique Local Address
+	prefixLinkLocal6 = netip.MustParsePrefix("fe80::/10")     // RFC 4291 Link-Local Unicast
+	prefixSiteLocal6 = netip.MustParsePrefix("fec0::/10")     // RFC 3879 Site-Local (deprecated)
+	prefixMulticast6 = netip.MustParsePrefix("ff00::/8")      // RFC 4291 Multicast
 
 	// IPv4/IPv6 translation / mapping prefixes
-	prefixNAT64WKP   = netip.MustParsePrefix("64:ff9b::/96")       // RFC 6052 Well-Known Prefix
-	prefixSIIT       = netip.MustParsePrefix("::ffff:0:0:0/96")    // RFC 2765 SIIT translated
-	prefixCompat6    = netip.MustParsePrefix("::/96")              // RFC 4291 IPv4-compatible (deprecated)
+	prefixNAT64WKP = netip.MustParsePrefix("64:ff9b::/96")    // RFC 6052 Well-Known Prefix
+	prefixSIIT     = netip.MustParsePrefix("::ffff:0:0:0/96") // RFC 2765 SIIT translated
+	prefixCompat6  = netip.MustParsePrefix("::/96")           // RFC 4291 IPv4-compatible (deprecated)
 )
 
 func isBlocked(addr netip.Addr, opts Options) bool {

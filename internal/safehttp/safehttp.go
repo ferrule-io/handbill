@@ -30,7 +30,7 @@ type Options struct {
 	// AllowLoopback / AllowPrivate exist ONLY for tests; default false.
 	AllowLoopback bool
 	AllowPrivate  bool
-	Resolver     *net.Resolver // optional, for tests
+	Resolver      *net.Resolver // optional, for tests
 	// TLSClientConfig is optional, for tests (e.g. httptest TLS server root CAs).
 	TLSClientConfig *tls.Config
 }
