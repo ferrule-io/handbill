@@ -377,7 +377,6 @@ func TestPathResolution(t *testing.T) {
 		"/index.html": {200, "<h1>home</h1>", "text/html; charset=utf-8"},
 		"/about":      {200, "<h1>about</h1>", "text/html; charset=utf-8"},
 		"/about.html": {200, "<h1>about</h1>", "text/html; charset=utf-8"},
-		"/docs":       {200, "<h1>docs</h1>", "text/html; charset=utf-8"},
 		"/docs/":      {200, "<h1>docs</h1>", "text/html; charset=utf-8"},
 		"/docs/guide": {200, "guide without extension", "application/octet-stream"},
 		"/app.css":    {200, "h1{color:red}", "text/css; charset=utf-8"},
@@ -393,6 +392,14 @@ func TestPathResolution(t *testing.T) {
 		}
 		if rec.Header().Get("X-Content-Type-Options") != "nosniff" || rec.Header().Get("Cache-Control") != "private, no-cache" {
 			t.Errorf("%s: headers %v", path, rec.Header())
+		}
+	}
+
+	// A directory index without its slash redirects, keeping the query.
+	for path, want := range map[string]string{"/docs": "/docs/", "/docs?x=1&y=2": "/docs/?x=1&y=2"} {
+		rec := e.do(req{url: e.siteURL(e.site.ID, path), cookie: cookie})
+		if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != want {
+			t.Errorf("%s: %d %q, want 301 %q", path, rec.Code, rec.Header().Get("Location"), want)
 		}
 	}
 

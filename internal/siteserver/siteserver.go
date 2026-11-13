@@ -130,6 +130,17 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	if status == http.StatusOK && !strings.HasSuffix(r.URL.Path, "/") && strings.HasSuffix(fi.Path, "/index.html") {
+		// A directory index: redirect to the slash form so the page's
+		// relative links resolve inside the directory.
+		target := r.URL.EscapedPath() + "/"
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		w.Header().Set("Cache-Control", "private, no-cache")
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
+		return
+	}
 	h.serveFile(w, r, siteID, fi, status)
 }
 
@@ -155,7 +166,8 @@ func (h *handler) authorize(r *http.Request, siteID string) (sites.Access, bool,
 }
 
 // candidates maps a request path to site paths, in order: "/" and
-// directory paths → index.html; "/foo" → foo, foo/index.html, foo.html.
+// directory paths → index.html; "/foo" → foo, foo/index.html (answered
+// with a redirect to "/foo/"), foo.html.
 func candidates(urlPath string) []string {
 	p := strings.TrimPrefix(urlPath, "/")
 	if p == "" || strings.HasSuffix(p, "/") {
