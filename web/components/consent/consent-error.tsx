@@ -1,6 +1,7 @@
 import { AuthHeading, FormError } from "@/components/auth/parts"
 
-const RETRY = "This connection request can’t continue. Go back to your app and try connecting again."
+// The heading says the request can't continue; this says what to do.
+const RETRY = "Go back to your app and try connecting again."
 
 /** Fixed messages for /consent?error=<code>; the page never shows request text. */
 const extra: Record<string, string> = {

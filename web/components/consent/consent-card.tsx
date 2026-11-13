@@ -7,9 +7,9 @@ import { useEffect, useState } from "react"
 import { AuthHeading, FormError, Spinner } from "@/components/auth/parts"
 import { ConsentError } from "@/components/consent/consent-error"
 import { clientName, decide, getConsent, type ConsentRequest } from "@/components/consent/data"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError, errorMessage, loginHref } from "@/lib/api"
 
 const EXPIRED = "This request expired or belongs to another account. Start the connection again from your app."
@@ -106,7 +106,7 @@ export function ConsentCard({ request, data }: { request: string; data: ConsentR
         title={
           <>
             <span className="text-brand">{name}</span> wants to publish sites as{" "}
-            <span className="break-all">{data.account.email}</span>
+            <span className="break-words">{data.account.email}</span>
           </>
         }
       >
