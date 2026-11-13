@@ -58,6 +58,8 @@ ingress:
         - "*.sites.example.com"
 ```
 
+**Request body size.** MCP `publish_site` requests can be up to 16 MiB and archive uploads to `/api/deployments/<id>/archive` up to 512 MiB, more than common ingress defaults allow (ingress-nginx: 1 MiB), so raise the limit for the app host, e.g. `nginx.ingress.kubernetes.io/proxy-body-size: 600m` under `ingress.annotations` for ingress-nginx, or a Traefik `buffering` middleware with `maxRequestBodyBytes: 629145600` attached via `traefik.ingress.kubernetes.io/router.middlewares: <namespace>-<middleware>@kubernetescrd`.
+
 ### Wildcard DNS and Wildcard TLS Requirements
 
 1. **DNS**:
