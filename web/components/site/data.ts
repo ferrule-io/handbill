@@ -31,6 +31,10 @@ export type Version = {
 export const can = {
   edit: (role: Role) => role === "owner" || role === "manager",
   publish: (role: Role) => role === "owner" || role === "manager",
+  manageViewers: (role: Role) => role === "owner" || role === "manager",
+  manageManagers: (role: Role) => role === "owner",
+  managePublicLink: (role: Role) => role === "owner",
+  transfer: (role: Role) => role === "owner",
 }
 
 export type Load<T> =

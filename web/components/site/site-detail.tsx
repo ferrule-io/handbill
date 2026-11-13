@@ -9,8 +9,12 @@ import { Container, Stack } from "@/components/layout/container"
 import { EmptyState } from "@/components/layout/empty-state"
 import { PageHeader, Section } from "@/components/layout/page-header"
 import { can, useApi, type Site, type Version } from "@/components/site/data"
+import { SiteMembers } from "@/components/site/members"
+import { WelcomeBanner } from "@/components/site/members-welcome"
+import { PublicLink } from "@/components/site/public-link"
 import { SiteOverview } from "@/components/site/site-overview"
 import { SiteVersions } from "@/components/site/site-versions"
+import { Transfer } from "@/components/site/transfer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -58,6 +62,7 @@ type SiteResponse = { site: Site; currentVersion: Version | null }
 function SiteView({ id }: { id: string }) {
   const [load, reload] = useApi<SiteResponse>(`/app-api/sites/${id}`)
   const [editing, setEditing] = useState(false)
+  const welcome = useSearchParams().get("welcome") === "1"
 
   if (load.state === "loading") return <SiteDetailSkeleton id={id} />
   if (load.state === "error") {
@@ -115,6 +120,7 @@ function SiteView({ id }: { id: string }) {
             </>
           }
         />
+        {welcome && <WelcomeBanner site={site} published={currentVersion !== null} />}
         <Section title="Overview" description="Where the site lives and what it serves right now.">
           <SiteOverview
             site={site}
@@ -132,6 +138,31 @@ function SiteView({ id }: { id: string }) {
             description="Every publish is kept. Rolling back switches what viewers see at once; newer versions stay here."
           >
             <SiteVersions site={site} onRollback={reload} />
+          </Section>
+        )}
+        {can.manageViewers(site.role) && (
+          <Section
+            title="Members"
+            description={
+              can.manageManagers(site.role)
+                ? "Invite people by email as viewers or managers. Changes apply on their next page load."
+                : "Invite viewers by email and remove them. Only the owner adds or removes managers."
+            }
+          >
+            <SiteMembers site={site} />
+          </Section>
+        )}
+        {can.manageViewers(site.role) && (
+          <Section
+            title="Public link"
+            description="An optional link that lets anyone who has it view the site without an account."
+          >
+            <PublicLink site={site} />
+          </Section>
+        )}
+        {can.transfer(site.role) && (
+          <Section title="Ownership" description="Hand this site to another account. It completes when they accept.">
+            <Transfer site={site} />
           </Section>
         )}
       </Stack>
