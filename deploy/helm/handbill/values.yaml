@@ -1,8 +1,8 @@
-# Default values for agent-dash.
+# Default values for handbill.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# Number of agent-dash replicas.
+# Number of handbill replicas.
 # NOTE: If replicaCount > 1 and storage.type is "local", persistence.accessModes
 # must include ReadWriteMany (RWX), or use s3 / gcs storage.
 replicaCount: 1
@@ -14,7 +14,7 @@ strategy: {}
 
 image:
   # Container image repository (no invented registry)
-  repository: agent-dash
+  repository: handbill
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
@@ -86,8 +86,8 @@ postgresql:
     tag: "17"
     pullPolicy: IfNotPresent
   auth:
-    database: agent_dash
-    username: agent_dash
+    database: handbill
+    username: handbill
     # Explicit password (if empty and existingSecret is unset, a random password is generated via lookup)
     password: ""
     # Use an existing Secret for the PostgreSQL password
@@ -184,10 +184,10 @@ ingress:
     # Example cert-manager DNS-01 configuration for wildcard domain:
     # cert-manager.io/cluster-issuer: letsencrypt-dns01
   tls: []
-    # - secretName: agent-dash-tls
+    # - secretName: handbill-tls
     #   hosts:
     #     - dash.example.com
-    # - secretName: agent-dash-sites-tls
+    # - secretName: handbill-sites-tls
     #   hosts:
     #     - "*.sites.example.com"
 

@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "agent-dash.name" -}}
+{{- define "handbill.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "agent-dash.fullname" -}}
+{{- define "handbill.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -26,16 +26,16 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "agent-dash.chart" -}}
+{{- define "handbill.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 Common labels
 */}}
-{{- define "agent-dash.labels" -}}
-helm.sh/chart: {{ include "agent-dash.chart" . }}
-{{ include "agent-dash.selectorLabels" . }}
+{{- define "handbill.labels" -}}
+helm.sh/chart: {{ include "handbill.chart" . }}
+{{ include "handbill.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -45,8 +45,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "agent-dash.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "agent-dash.name" . }}
+{{- define "handbill.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "handbill.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: app
 {{- end -}}
@@ -54,9 +54,9 @@ app.kubernetes.io/component: app
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "agent-dash.serviceAccountName" -}}
+{{- define "handbill.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
-    {{- default (include "agent-dash.fullname" .) .Values.serviceAccount.name -}}
+    {{- default (include "handbill.fullname" .) .Values.serviceAccount.name -}}
 {{- else -}}
     {{- default "default" .Values.serviceAccount.name -}}
 {{- end -}}
@@ -65,7 +65,7 @@ Create the name of the service account to use
 {{/*
 Derive app hostname from app.origin (strips scheme and port if present)
 */}}
-{{- define "agent-dash.appHost" -}}
+{{- define "handbill.appHost" -}}
 {{- $raw := .Values.app.origin | default "dash.example.com" -}}
 {{- $noScheme := $raw | trimPrefix "https://" | trimPrefix "http://" -}}
 {{- $hostAndPort := $noScheme | splitList "/" | first -}}
@@ -76,24 +76,24 @@ Derive app hostname from app.origin (strips scheme and port if present)
 {{/*
 PostgreSQL fullname
 */}}
-{{- define "agent-dash.postgresqlFullname" -}}
-{{- printf "%s-postgresql" (include "agent-dash.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "handbill.postgresqlFullname" -}}
+{{- printf "%s-postgresql" (include "handbill.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 PostgreSQL common labels
 */}}
-{{- define "agent-dash.postgresqlLabels" -}}
-helm.sh/chart: {{ include "agent-dash.chart" . }}
-{{ include "agent-dash.postgresqlSelectorLabels" . }}
+{{- define "handbill.postgresqlLabels" -}}
+helm.sh/chart: {{ include "handbill.chart" . }}
+{{ include "handbill.postgresqlSelectorLabels" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{/*
 PostgreSQL selector labels
 */}}
-{{- define "agent-dash.postgresqlSelectorLabels" -}}
-app.kubernetes.io/name: {{ include "agent-dash.name" . }}
+{{- define "handbill.postgresqlSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "handbill.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: postgresql
 {{- end -}}
@@ -101,18 +101,18 @@ app.kubernetes.io/component: postgresql
 {{/*
 PostgreSQL secret name
 */}}
-{{- define "agent-dash.postgresqlSecretName" -}}
+{{- define "handbill.postgresqlSecretName" -}}
 {{- if .Values.postgresql.auth.existingSecret -}}
     {{- .Values.postgresql.auth.existingSecret -}}
 {{- else -}}
-    {{- include "agent-dash.postgresqlFullname" . -}}
+    {{- include "handbill.postgresqlFullname" . -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 PostgreSQL secret password key
 */}}
-{{- define "agent-dash.postgresqlSecretPasswordKey" -}}
+{{- define "handbill.postgresqlSecretPasswordKey" -}}
 {{- if .Values.postgresql.auth.existingSecret -}}
     {{- .Values.postgresql.auth.existingSecretPasswordKey | default "password" -}}
 {{- else -}}
@@ -123,13 +123,13 @@ PostgreSQL secret password key
 {{/*
 PostgreSQL password value (lookup or generated)
 */}}
-{{- define "agent-dash.postgresqlPassword" -}}
+{{- define "handbill.postgresqlPassword" -}}
 {{- if .Values.postgresql.auth.password -}}
     {{- .Values.postgresql.auth.password -}}
 {{- else -}}
-    {{- $secret := (lookup "v1" "Secret" .Release.Namespace (include "agent-dash.postgresqlSecretName" .)) -}}
-    {{- if and $secret $secret.data (hasKey $secret.data (include "agent-dash.postgresqlSecretPasswordKey" .)) -}}
-        {{- index $secret.data (include "agent-dash.postgresqlSecretPasswordKey" .) | b64dec -}}
+    {{- $secret := (lookup "v1" "Secret" .Release.Namespace (include "handbill.postgresqlSecretName" .)) -}}
+    {{- if and $secret $secret.data (hasKey $secret.data (include "handbill.postgresqlSecretPasswordKey" .)) -}}
+        {{- index $secret.data (include "handbill.postgresqlSecretPasswordKey" .) | b64dec -}}
     {{- else -}}
         {{- randAlphaNum 32 -}}
     {{- end -}}
@@ -139,18 +139,18 @@ PostgreSQL password value (lookup or generated)
 {{/*
 External database secret name
 */}}
-{{- define "agent-dash.externalDatabaseSecretName" -}}
+{{- define "handbill.externalDatabaseSecretName" -}}
 {{- if .Values.externalDatabase.existingSecret -}}
     {{- .Values.externalDatabase.existingSecret -}}
 {{- else -}}
-    {{- printf "%s-externaldb" (include "agent-dash.fullname" .) | trunc 63 | trimSuffix "-" -}}
+    {{- printf "%s-externaldb" (include "handbill.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 External database secret password key
 */}}
-{{- define "agent-dash.externalDatabaseSecretPasswordKey" -}}
+{{- define "handbill.externalDatabaseSecretPasswordKey" -}}
 {{- if .Values.externalDatabase.existingSecret -}}
     {{- .Values.externalDatabase.existingSecretPasswordKey | default "password" -}}
 {{- else -}}
@@ -161,18 +161,18 @@ External database secret password key
 {{/*
 Secret key secret name
 */}}
-{{- define "agent-dash.secretKeySecretName" -}}
+{{- define "handbill.secretKeySecretName" -}}
 {{- if .Values.secretKey.existingSecret -}}
     {{- .Values.secretKey.existingSecret -}}
 {{- else -}}
-    {{- printf "%s-secret-key" (include "agent-dash.fullname" .) | trunc 63 | trimSuffix "-" -}}
+    {{- printf "%s-secret-key" (include "handbill.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 Secret key key in secret
 */}}
-{{- define "agent-dash.secretKeyKey" -}}
+{{- define "handbill.secretKeyKey" -}}
 {{- if .Values.secretKey.existingSecret -}}
     {{- .Values.secretKey.existingSecretKey | default "secret-key" -}}
 {{- else -}}
@@ -183,13 +183,13 @@ Secret key key in secret
 {{/*
 Secret key value (lookup or generated)
 */}}
-{{- define "agent-dash.secretKeyValue" -}}
+{{- define "handbill.secretKeyValue" -}}
 {{- if .Values.secretKey.value -}}
     {{- .Values.secretKey.value -}}
 {{- else -}}
-    {{- $secret := (lookup "v1" "Secret" .Release.Namespace (include "agent-dash.secretKeySecretName" .)) -}}
-    {{- if and $secret $secret.data (hasKey $secret.data (include "agent-dash.secretKeyKey" .)) -}}
-        {{- index $secret.data (include "agent-dash.secretKeyKey" .) | b64dec -}}
+    {{- $secret := (lookup "v1" "Secret" .Release.Namespace (include "handbill.secretKeySecretName" .)) -}}
+    {{- if and $secret $secret.data (hasKey $secret.data (include "handbill.secretKeyKey" .)) -}}
+        {{- index $secret.data (include "handbill.secretKeyKey" .) | b64dec -}}
     {{- else -}}
         {{- randAlphaNum 64 -}}
     {{- end -}}
@@ -199,18 +199,18 @@ Secret key value (lookup or generated)
 {{/*
 SMTP secret name
 */}}
-{{- define "agent-dash.smtpSecretName" -}}
+{{- define "handbill.smtpSecretName" -}}
 {{- if .Values.smtp.existingSecret -}}
     {{- .Values.smtp.existingSecret -}}
 {{- else -}}
-    {{- printf "%s-smtp" (include "agent-dash.fullname" .) | trunc 63 | trimSuffix "-" -}}
+    {{- printf "%s-smtp" (include "handbill.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 SMTP secret password key
 */}}
-{{- define "agent-dash.smtpSecretPasswordKey" -}}
+{{- define "handbill.smtpSecretPasswordKey" -}}
 {{- if .Values.smtp.existingSecret -}}
     {{- .Values.smtp.existingSecretPasswordKey | default "password" -}}
 {{- else -}}

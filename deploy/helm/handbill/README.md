@@ -1,10 +1,10 @@
-# agent-dash Helm Chart
+# handbill Helm Chart
 
-A Helm chart for **agent-dash**, a self-hosted output endpoint for agent artifacts (MCP server, web dashboard, and isolated static site file server).
+A Helm chart for **handbill**, a self-hosted output endpoint for agent artifacts (MCP server, web dashboard, and isolated static site file server).
 
 ## Overview
 
-`agent-dash` packages a single Go binary and an embedded frontend into one container image:
+`handbill` packages a single Go binary and an embedded frontend into one container image:
 - **App & MCP**: Serves the web dashboard, authentication, OAuth 2.1 AS, and the Model Context Protocol endpoint (`/mcp`) on `app.origin` (e.g. `https://dash.example.com`).
 - **Site File Server**: Serves agent-published static sites on subdomains of `app.sitesDomain` (e.g. `https://<site-id>.sites.example.com`). Each site runs on an isolated origin with strict security boundaries (`nosniff`, `__Host-` cookies, no CORS to site origins).
 
@@ -17,11 +17,11 @@ A Helm chart for **agent-dash**, a self-hosted output endpoint for agent artifac
 
 ## Quickstart
 
-Install `agent-dash` with default settings (bundled PostgreSQL StatefulSet and local filesystem storage):
+Install `handbill` with default settings (bundled PostgreSQL StatefulSet and local filesystem storage):
 
 ```bash
-helm install agent-dash ./deploy/helm/agent-dash \
-  --namespace agent-dash \
+helm install handbill ./deploy/helm/handbill \
+  --namespace handbill \
   --create-namespace \
   --set app.origin="https://dash.example.com" \
   --set app.sitesDomain="sites.example.com"
@@ -29,7 +29,7 @@ helm install agent-dash ./deploy/helm/agent-dash \
 
 ## Domain Architecture and Host Routing
 
-`agent-dash` multiplexes traffic based on the HTTP `Host` header:
+`handbill` multiplexes traffic based on the HTTP `Host` header:
 1. `APP_ORIGIN` (e.g. `dash.example.com`): Routes to the management UI, authentication flows, OAuth 2.1 endpoints, and `/mcp`.
 2. `*.<SITES_DOMAIN>` (e.g. `<site-id>.sites.example.com`): Routes to the artifact static file server.
 
@@ -39,7 +39,7 @@ When `ingress.enabled=true`, the chart creates a Kubernetes Ingress resource wit
 - `dash.example.com` (extracted from `app.origin`)
 - `*.sites.example.com` (`*.` prepended to `app.sitesDomain`)
 
-Both rules forward traffic to the `agent-dash` Service on port 8080.
+Both rules forward traffic to the `handbill` Service on port 8080.
 
 Example with TLS and cert-manager:
 
@@ -50,10 +50,10 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-dns01
   tls:
-    - secretName: agent-dash-app-tls
+    - secretName: handbill-app-tls
       hosts:
         - dash.example.com
-    - secretName: agent-dash-wildcard-tls
+    - secretName: handbill-wildcard-tls
       hosts:
         - "*.sites.example.com"
 ```
@@ -75,14 +75,14 @@ ingress:
 
 If you manage routing outside the chart (e.g. using Gateway API, custom Ingress, Traefik, Envoy Gateway, or Cloudflare Tunnels):
 1. Keep `ingress.enabled=false` (the default).
-2. Ensure your ingress or reverse proxy routes **both** hostnames to the `agent-dash` Service (`<release-name>-agent-dash` on port 8080):
+2. Ensure your ingress or reverse proxy routes **both** hostnames to the `handbill` Service (`<release-name>-handbill` on port 8080):
    - Exact host: `dash.example.com`
    - Wildcard host: `*.sites.example.com`
 3. Ensure the reverse proxy preserves the `Host` header and client IP headers (`X-Forwarded-For`, `X-Forwarded-Proto`).
 
 ## Database Configuration
 
-`agent-dash` requires a PostgreSQL database. The chart supports either a bundled PostgreSQL instance or an external database.
+`handbill` requires a PostgreSQL database. The chart supports either a bundled PostgreSQL instance or an external database.
 
 ### 1. Bundled PostgreSQL (`postgresql.enabled=true`)
 
@@ -95,8 +95,8 @@ By default, the chart deploys a single-instance PostgreSQL StatefulSet using the
 postgresql:
   enabled: true
   auth:
-    database: agent_dash
-    username: agent_dash
+    database: handbill
+    username: handbill
     existingSecret: "" # optional existing secret
   persistence:
     enabled: true
@@ -116,8 +116,8 @@ postgresql:
 externalDatabase:
   host: "postgres.internal.example.com"
   port: 5432
-  database: "agent_dash"
-  user: "agent_dash"
+  database: "handbill"
+  user: "handbill"
   sslmode: "require"
   existingSecret: "postgres-credentials"
   existingSecretPasswordKey: "password"
@@ -132,7 +132,7 @@ postgresql:
   enabled: false
 
 externalDatabase:
-  existingSecret: "agent-dash-database-url"
+  existingSecret: "handbill-database-url"
   existingSecretDsnKey: "DATABASE_URL"
 ```
 
@@ -142,7 +142,7 @@ The container receives `DATABASE_URL` sourced directly from the specified Secret
 
 ## Storage Configuration
 
-`agent-dash` supports three storage backends configured via `storage.type`: `local`, `s3`, or `gcs`.
+`handbill` supports three storage backends configured via `storage.type`: `local`, `s3`, or `gcs`.
 
 ### 1. Local Filesystem (`storage.type=local`)
 
@@ -177,7 +177,7 @@ Stores artifacts in an S3 bucket (or S3-compatible systems like MinIO or Cloudfl
 storage:
   type: s3
   s3:
-    bucket: "my-agent-dash-artifacts"
+    bucket: "my-handbill-artifacts"
     region: "us-east-1"
     endpoint: ""       # optional, e.g. "https://s3.us-east-1.amazonaws.com" or MinIO URL
     prefix: "sites"    # optional key prefix
@@ -193,7 +193,7 @@ For AWS IRSA (IAM Roles for Service Accounts), leave `existingSecret` empty and 
 ```yaml
 serviceAccount:
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/agent-dash-s3"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/handbill-s3"
 ```
 
 ### 3. Google Cloud Storage (`storage.type=gcs`)
@@ -204,7 +204,7 @@ Stores artifacts in a GCS bucket.
 storage:
   type: gcs
   gcs:
-    bucket: "my-agent-dash-artifacts"
+    bucket: "my-handbill-artifacts"
     prefix: "sites"    # optional prefix
     # Existing Secret containing service-account-key.json
     existingSecret: "gcs-sa-key"
@@ -217,14 +217,14 @@ For GKE Workload Identity, leave `existingSecret` empty and annotate the Service
 ```yaml
 serviceAccount:
   annotations:
-    iam.gke.io/gcp-service-account: "agent-dash@project-id.iam.gserviceaccount.com"
+    iam.gke.io/gcp-service-account: "handbill@project-id.iam.gserviceaccount.com"
 ```
 
 ## Authentication & Security
 
 ### Application Secret Key (`SECRET_KEY`)
 
-`agent-dash` uses `SECRET_KEY` (≥ 32 bytes) for HMAC-SHA256 signing of session tokens, site cookies, and signed upload URLs.
+`handbill` uses `SECRET_KEY` (≥ 32 bytes) for HMAC-SHA256 signing of session tokens, site cookies, and signed upload URLs.
 - If `secretKey.existingSecret` is unset, the chart automatically generates a secure 64-character random key and stores it in a Secret. On upgrades, Helm `lookup` preserves the existing key.
 - To provide your own pre-created Secret:
 
@@ -279,14 +279,14 @@ The chart applies Kubernetes security best practices out-of-the-box:
 - **Read-Only Root Filesystem & Temp Directory**: Enabled (`readOnlyRootFilesystem: true`). An ephemeral `emptyDir` is mounted at `/tmp` across all storage modes so site artifact uploads (tar/zip archives) can be unpacked and spooled without root filesystem writes.
 - **PostgreSQL Bundled Storage**: The bundled Debian-based PostgreSQL container runs as UID/GID `999` with `fsGroup: 999`. The cluster data directory is set to `PGDATA: /var/lib/postgresql/data/pgdata` (a subdirectory) to prevent `initdb` failures on volumes provisioned with a `lost+found` directory.
 - **Startup & Health Probes**: A `startupProbe` on `/healthz` provides up to 150 seconds for PostgreSQL initialization and database migrations to complete before `livenessProbe` and `readinessProbe` start checking the pod.
-- **Component Labeling & Port Forwarding**: The application Deployment and Service use `app.kubernetes.io/component: app` to ensure the application Service and port-forward commands target only agent-dash application pods, not the bundled PostgreSQL StatefulSet pod (`app.kubernetes.io/component: postgresql`).
+- **Component Labeling & Port Forwarding**: The application Deployment and Service use `app.kubernetes.io/component: app` to ensure the application Service and port-forward commands target only handbill application pods, not the bundled PostgreSQL StatefulSet pod (`app.kubernetes.io/component: postgresql`).
 
 ## Configuration Reference
 
 | Parameter | Description | Default |
 |---|---|---|
-| `replicaCount` | Number of agent-dash replicas | `1` |
-| `image.repository` | Container image repository | `agent-dash` |
+| `replicaCount` | Number of handbill replicas | `1` |
+| `image.repository` | Container image repository | `handbill` |
 | `image.tag` | Image tag (defaults to `.Chart.AppVersion`) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `imagePullSecrets` | Secrets for private image registries | `[]` |
@@ -297,8 +297,8 @@ The chart applies Kubernetes security best practices out-of-the-box:
 | `postgresql.enabled` | Deploy bundled PostgreSQL StatefulSet | `true` |
 | `postgresql.image.repository` | Official postgres image repository | `postgres` |
 | `postgresql.image.tag` | PostgreSQL image tag | `17` |
-| `postgresql.auth.database` | Database name | `agent_dash` |
-| `postgresql.auth.username` | Database user | `agent_dash` |
+| `postgresql.auth.database` | Database name | `handbill` |
+| `postgresql.auth.username` | Database user | `handbill` |
 | `postgresql.auth.existingSecret` | Secret with existing PostgreSQL password | `""` |
 | `postgresql.persistence.enabled`| Enable persistence for PostgreSQL | `true` |
 | `postgresql.persistence.size` | Storage size for PostgreSQL PVC | `10Gi` |

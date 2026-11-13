@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "agent-dash.fullname" . }}
+  name: {{ include "handbill.fullname" . }}
   labels:
-    {{- include "agent-dash.labels" . | nindent 4 }}
+    {{- include "handbill.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -18,14 +18,14 @@ spec:
     {{- toYaml .Values.ingress.tls | nindent 4 }}
   {{- end }}
   rules:
-    - host: {{ include "agent-dash.appHost" . | quote }}
+    - host: {{ include "handbill.appHost" . | quote }}
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ include "agent-dash.fullname" . }}
+                name: {{ include "handbill.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
     - host: {{ printf "*.%s" .Values.app.sitesDomain | quote }}
@@ -35,7 +35,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "agent-dash.fullname" . }}
+                name: {{ include "handbill.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
 {{- end }}

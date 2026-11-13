@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# scripts/kind-smoke.sh: Verifies the agent-dash Helm chart in a local kind cluster.
+# scripts/kind-smoke.sh: Verifies the handbill Helm chart in a local kind cluster.
 # Covers:
 #   (a) Defaults (bundled PostgreSQL, local storage PVC)
 #   (b) External database (plain postgres:17 + PG* env vars)
@@ -9,9 +9,9 @@ set -euo pipefail
 #   (d) Ingress enabled (ingress-nginx on kind with --resolve)
 #   (e) Helm upgrade idempotency & data persistence
 
-CLUSTER_NAME="${KIND_CLUSTER_NAME:-agent-dash-smoke}"
-IMAGE_NAME="${AGENT_DASH_IMAGE:-agent-dash:smoke}"
-CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../deploy/helm/agent-dash" && pwd)"
+CLUSTER_NAME="${KIND_CLUSTER_NAME:-handbill-smoke}"
+IMAGE_NAME="${HANDBILL_IMAGE:-handbill:smoke}"
+CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../deploy/helm/handbill" && pwd)"
 APP_HOST="dash.example.com"
 SITES_DOMAIN="sites.example.com"
 SAMPLE_SITE_ID="abcdef234567"
@@ -159,15 +159,15 @@ $HELM install smoke-def "$CHART_DIR" \
   --set app.sitesDomain="${SITES_DOMAIN}"
 
 log "Waiting for rollout in ${NS_DEFAULT}..."
-$KUBECTL -n "$NS_DEFAULT" rollout status statefulset smoke-def-agent-dash-postgresql --timeout=120s
-$KUBECTL -n "$NS_DEFAULT" rollout status deployment smoke-def-agent-dash --timeout=120s
+$KUBECTL -n "$NS_DEFAULT" rollout status statefulset smoke-def-handbill-postgresql --timeout=120s
+$KUBECTL -n "$NS_DEFAULT" rollout status deployment smoke-def-handbill --timeout=120s
 
-verify_port_forward "$NS_DEFAULT" "smoke-def-agent-dash" 18080
+verify_port_forward "$NS_DEFAULT" "smoke-def-handbill" 18080
 
 # Case (e): helm upgrade with no changes
 log "Running Case (e): Helm upgrade idempotency & data persistence check..."
-SK_BEFORE=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-agent-dash-secret-key -o jsonpath='{.data.secret-key}')
-PG_BEFORE=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-agent-dash-postgresql -o jsonpath='{.data.password}')
+SK_BEFORE=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-handbill-secret-key -o jsonpath='{.data.secret-key}')
+PG_BEFORE=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-handbill-postgresql -o jsonpath='{.data.password}')
 
 $HELM upgrade smoke-def "$CHART_DIR" \
   --namespace "$NS_DEFAULT" \
@@ -177,8 +177,8 @@ $HELM upgrade smoke-def "$CHART_DIR" \
   --set app.origin="https://${APP_HOST}" \
   --set app.sitesDomain="${SITES_DOMAIN}"
 
-SK_AFTER=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-agent-dash-secret-key -o jsonpath='{.data.secret-key}')
-PG_AFTER=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-agent-dash-postgresql -o jsonpath='{.data.password}')
+SK_AFTER=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-handbill-secret-key -o jsonpath='{.data.secret-key}')
+PG_AFTER=$($KUBECTL -n "$NS_DEFAULT" get secret smoke-def-handbill-postgresql -o jsonpath='{.data.password}')
 
 if [ "$SK_BEFORE" = "$SK_AFTER" ] && [ -n "$SK_BEFORE" ]; then
   pass "Helm upgrade: SECRET_KEY preserved identically across upgrade"
@@ -193,12 +193,12 @@ else
 fi
 
 log "Waiting for deployment rollout post-upgrade..."
-$KUBECTL -n "$NS_DEFAULT" rollout status deployment smoke-def-agent-dash --timeout=120s
-verify_port_forward "$NS_DEFAULT" "smoke-def-agent-dash" 18080
+$KUBECTL -n "$NS_DEFAULT" rollout status deployment smoke-def-handbill --timeout=120s
+verify_port_forward "$NS_DEFAULT" "smoke-def-handbill" 18080
 
 # Verify goose_db_version migration table still exists
-GOOSE_COUNT=$($KUBECTL -n "$NS_DEFAULT" exec smoke-def-agent-dash-postgresql-0 -- \
-  psql -U agent_dash -d agent_dash -t -A -c "SELECT count(*) FROM goose_db_version;" || echo "0")
+GOOSE_COUNT=$($KUBECTL -n "$NS_DEFAULT" exec smoke-def-handbill-postgresql-0 -- \
+  psql -U handbill -d handbill -t -A -c "SELECT count(*) FROM goose_db_version;" || echo "0")
 if [ "$GOOSE_COUNT" -gt 0 ]; then
   pass "Helm upgrade: goose_db_version exists and has applied migrations (count: ${GOOSE_COUNT})"
 else
@@ -285,9 +285,9 @@ $HELM install smoke-ext "$CHART_DIR" \
   --set externalDatabase.existingSecret=ext-db-secret \
   --set externalDatabase.existingSecretPasswordKey=db-password
 
-log "Waiting for agent-dash in ${NS_EXT}..."
-$KUBECTL -n "$NS_EXT" rollout status deployment smoke-ext-agent-dash --timeout=120s
-verify_port_forward "$NS_EXT" "smoke-ext-agent-dash" 18081
+log "Waiting for handbill in ${NS_EXT}..."
+$KUBECTL -n "$NS_EXT" rollout status deployment smoke-ext-handbill --timeout=120s
+verify_port_forward "$NS_EXT" "smoke-ext-handbill" 18081
 cleanup_namespace "$NS_EXT"
 
 # ---------------------------------------------------------------------------
@@ -362,9 +362,9 @@ $HELM install smoke-dsn "$CHART_DIR" \
   --set externalDatabase.existingSecret=dsn-secret \
   --set externalDatabase.existingSecretDsnKey=dsn-key
 
-log "Waiting for agent-dash in ${NS_DSN}..."
-$KUBECTL -n "$NS_DSN" rollout status deployment smoke-dsn-agent-dash --timeout=120s
-verify_port_forward "$NS_DSN" "smoke-dsn-agent-dash" 18082
+log "Waiting for handbill in ${NS_DSN}..."
+$KUBECTL -n "$NS_DSN" rollout status deployment smoke-dsn-handbill --timeout=120s
+verify_port_forward "$NS_DSN" "smoke-dsn-handbill" 18082
 cleanup_namespace "$NS_DSN"
 
 # ---------------------------------------------------------------------------
@@ -397,8 +397,8 @@ $HELM install smoke-ing "$CHART_DIR" \
   --set ingress.className=nginx
 
 log "Waiting for rollout in ${NS_ING}..."
-$KUBECTL -n "$NS_ING" rollout status statefulset smoke-ing-agent-dash-postgresql --timeout=120s
-$KUBECTL -n "$NS_ING" rollout status deployment smoke-ing-agent-dash --timeout=120s
+$KUBECTL -n "$NS_ING" rollout status statefulset smoke-ing-handbill-postgresql --timeout=120s
+$KUBECTL -n "$NS_ING" rollout status deployment smoke-ing-handbill --timeout=120s
 
 # Wait for ingress controller to sync rules
 sleep 5

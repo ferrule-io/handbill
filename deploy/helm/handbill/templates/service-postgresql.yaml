@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "agent-dash.postgresqlFullname" . }}
+  name: {{ include "handbill.postgresqlFullname" . }}
   labels:
-    {{- include "agent-dash.postgresqlLabels" . | nindent 4 }}
+    {{- include "handbill.postgresqlLabels" . | nindent 4 }}
 spec:
   type: ClusterIP
   ports:
@@ -13,5 +13,5 @@ spec:
       protocol: TCP
       name: postgresql
   selector:
-    {{- include "agent-dash.postgresqlSelectorLabels" . | nindent 4 }}
+    {{- include "handbill.postgresqlSelectorLabels" . | nindent 4 }}
 {{- end }}

@@ -2,19 +2,19 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "agent-dash.postgresqlFullname" . }}
+  name: {{ include "handbill.postgresqlFullname" . }}
   labels:
-    {{- include "agent-dash.postgresqlLabels" . | nindent 4 }}
+    {{- include "handbill.postgresqlLabels" . | nindent 4 }}
 spec:
-  serviceName: {{ include "agent-dash.postgresqlFullname" . }}
+  serviceName: {{ include "handbill.postgresqlFullname" . }}
   replicas: 1
   selector:
     matchLabels:
-      {{- include "agent-dash.postgresqlSelectorLabels" . | nindent 6 }}
+      {{- include "handbill.postgresqlSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "agent-dash.postgresqlLabels" . | nindent 8 }}
+        {{- include "handbill.postgresqlLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -36,8 +36,8 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agent-dash.postgresqlSecretName" . }}
-                  key: {{ include "agent-dash.postgresqlSecretPasswordKey" . }}
+                  name: {{ include "handbill.postgresqlSecretName" . }}
+                  key: {{ include "handbill.postgresqlSecretPasswordKey" . }}
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           ports:
@@ -90,7 +90,7 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- include "agent-dash.postgresqlSelectorLabels" . | nindent 10 }}
+          {{- include "handbill.postgresqlSelectorLabels" . | nindent 10 }}
       spec:
         accessModes:
           {{- toYaml .Values.postgresql.persistence.accessModes | nindent 10 }}

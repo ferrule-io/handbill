@@ -2,7 +2,7 @@
 {{- if not .Values.postgresql.enabled }}
   {{- $hasDsn := and .Values.externalDatabase.existingSecret .Values.externalDatabase.existingSecretDsnKey -}}
   {{- if and (not $hasDsn) (not .Values.externalDatabase.host) }}
-    {{- fail "agent-dash requires a database: either set postgresql.enabled=true or configure externalDatabase (set externalDatabase.host or externalDatabase.existingSecret with existingSecretDsnKey)" }}
+    {{- fail "handbill requires a database: either set postgresql.enabled=true or configure externalDatabase (set externalDatabase.host or externalDatabase.existingSecret with existingSecretDsnKey)" }}
   {{- end }}
 {{- end }}
 {{/* Validate local storage replica count and access mode */}}
@@ -12,9 +12,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "agent-dash.fullname" . }}
+  name: {{ include "handbill.fullname" . }}
   labels:
-    {{- include "agent-dash.labels" . | nindent 4 }}
+    {{- include "handbill.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   {{- if .Values.strategy }}
@@ -26,7 +26,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "agent-dash.selectorLabels" . | nindent 6 }}
+      {{- include "handbill.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -34,7 +34,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "agent-dash.labels" . | nindent 8 }}
+        {{- include "handbill.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -43,7 +43,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "agent-dash.serviceAccountName" . }}
+      serviceAccountName: {{ include "handbill.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -92,15 +92,15 @@ spec:
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agent-dash.secretKeySecretName" . }}
-                  key: {{ include "agent-dash.secretKeyKey" . }}
+                  name: {{ include "handbill.secretKeySecretName" . }}
+                  key: {{ include "handbill.secretKeyKey" . }}
             - name: OAUTH_DCR_ENABLED
               value: {{ .Values.oauth.dcrEnabled | default false | quote }}
             - name: INVITE_TTL
               value: {{ .Values.inviteTTL | default "336h" | quote }}
 {{- if .Values.postgresql.enabled }}
             - name: PGHOST
-              value: {{ include "agent-dash.postgresqlFullname" . | quote }}
+              value: {{ include "handbill.postgresqlFullname" . | quote }}
             - name: PGPORT
               value: "5432"
             - name: PGDATABASE
@@ -110,8 +110,8 @@ spec:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agent-dash.postgresqlSecretName" . }}
-                  key: {{ include "agent-dash.postgresqlSecretPasswordKey" . }}
+                  name: {{ include "handbill.postgresqlSecretName" . }}
+                  key: {{ include "handbill.postgresqlSecretPasswordKey" . }}
             - name: PGSSLMODE
               value: "disable"
 {{- else }}
@@ -136,8 +136,8 @@ spec:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agent-dash.externalDatabaseSecretName" . }}
-                  key: {{ include "agent-dash.externalDatabaseSecretPasswordKey" . }}
+                  name: {{ include "handbill.externalDatabaseSecretName" . }}
+                  key: {{ include "handbill.externalDatabaseSecretPasswordKey" . }}
     {{- end }}
   {{- end }}
 {{- end }}
@@ -200,8 +200,8 @@ spec:
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agent-dash.smtpSecretName" . }}
-                  key: {{ include "agent-dash.smtpSecretPasswordKey" . }}
+                  name: {{ include "handbill.smtpSecretName" . }}
+                  key: {{ include "handbill.smtpSecretPasswordKey" . }}
   {{- end }}
   {{- if .Values.smtp.from }}
             - name: SMTP_FROM
@@ -245,7 +245,7 @@ spec:
 {{- if eq .Values.storage.type "local" }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "agent-dash.fullname" . }}-data
+            claimName: {{ include "handbill.fullname" . }}-data
 {{- else if and (eq .Values.storage.type "gcs") .Values.storage.gcs.existingSecret }}
         - name: gcs-credentials
           secret:
