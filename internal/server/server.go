@@ -83,7 +83,16 @@ func New(d *Deps, modules ...Module) (http.Handler, error) {
 		app:   chain(rt.App, rt.appMW),
 		sites: chain(rt.Sites, rt.sitesMW),
 	}
-	return logRequests(d.Logger, recoverPanics(d.Logger, h)), nil
+	return logRequests(d.Logger, h.probe, recoverPanics(d.Logger, h)), nil
+}
+
+// probe reports whether r is a health probe (not site content).
+func (h *root) probe(r *http.Request) bool {
+	if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" {
+		return false
+	}
+	_, site := h.siteHost(Hostname(r.Host))
+	return !site
 }
 
 type siteIDKey struct{}

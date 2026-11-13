@@ -26,14 +26,15 @@ func recoverPanics(log *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// logRequests writes one structured line per request. Query strings are
-// never logged (they carry tickets and OAuth codes); see LogPath.
-func logRequests(log *slog.Logger, next http.Handler) http.Handler {
+// logRequests writes one structured line per request except health probes.
+// Query strings are never logged (they carry tickets and OAuth codes); see
+// LogPath.
+func logRequests(log *slog.Logger, probe func(*http.Request) bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+		if probe(r) {
 			return
 		}
 		log.Info("request",
