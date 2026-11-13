@@ -16,8 +16,8 @@ agent-dash has been deployed!
   If using cert-manager, wildcard certificates require a DNS-01 challenge issuer (HTTP-01 cannot issue wildcards).
 {{- else }}
   Get the application URL by running these commands:
-    export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "{{ include "agent-dash.selectorLabels" . }}" -o jsonpath="{.items[0].metadata.name}")
-    kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:{{ .Values.service.port }}
+    export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "agent-dash.name" . }},app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=app" -o jsonpath="{.items[0].metadata.name}")
+    kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "agent-dash.fullname" . }} 8080:{{ .Values.service.port }}
 
   Open the App UI at:
     http://127.0.0.1:8080 (or your configured APP_ORIGIN: {{ .Values.app.origin }})

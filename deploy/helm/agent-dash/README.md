@@ -268,13 +268,16 @@ oauth:
   dcrEnabled: true
 ```
 
-## Security Posture
+## Security Posture & Operational Notes
 
 The chart applies Kubernetes security best practices out-of-the-box:
-- **Non-root Execution**: Runs as UID/GID `65532`.
+- **Non-root Execution & Storage Permissions**: Runs as UID/GID `65532` (distroless `nonroot`). When `storage.type=local`, `podSecurityContext.fsGroup: 65532` ensures the persistent volume mounted at `/data` is writable by the container.
 - **Privilege Escalation**: Disabled (`allowPrivilegeEscalation: false`).
 - **Linux Capabilities**: Dropped (`capabilities.drop: ["ALL"]`).
-- **Read-Only Root Filesystem**: Enabled (`readOnlyRootFilesystem: true`). A writable `/data` volume is mounted only when `storage.type=local`. A small ephemeral `/tmp` emptyDir volume is provided for temporary processing.
+- **Read-Only Root Filesystem & Temp Directory**: Enabled (`readOnlyRootFilesystem: true`). An ephemeral `emptyDir` is mounted at `/tmp` across all storage modes so site artifact uploads (tar/zip archives) can be unpacked and spooled without root filesystem writes.
+- **PostgreSQL Bundled Storage**: The bundled Debian-based PostgreSQL container runs as UID/GID `999` with `fsGroup: 999`. The cluster data directory is set to `PGDATA: /var/lib/postgresql/data/pgdata` (a subdirectory) to prevent `initdb` failures on volumes provisioned with a `lost+found` directory.
+- **Startup & Health Probes**: A `startupProbe` on `/healthz` provides up to 150 seconds for PostgreSQL initialization and database migrations to complete before `livenessProbe` and `readinessProbe` start checking the pod.
+- **Component Labeling & Port Forwarding**: The application Deployment and Service use `app.kubernetes.io/component: app` to ensure the application Service and port-forward commands target only agent-dash application pods, not the bundled PostgreSQL StatefulSet pod (`app.kubernetes.io/component: postgresql`).
 
 ## Configuration Reference
 

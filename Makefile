@@ -4,7 +4,7 @@
 WEB_DIST := internal/webui/dist
 IMAGE    ?= agent-dash:dev
 
-.PHONY: all web build run db-up db-down test vet lint web-lint web-typecheck e2e docker clean
+.PHONY: all web build run db-up db-down test vet lint web-lint web-typecheck e2e docker clean kind-smoke
 
 all: web build
 
@@ -48,6 +48,10 @@ e2e:
 
 docker:
 	docker build -t $(IMAGE) .
+
+## kind-smoke: run kind-based Helm chart smoke tests
+kind-smoke:
+	./scripts/kind-smoke.sh
 
 clean:
 	rm -rf bin web/out web/.next

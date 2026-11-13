@@ -48,6 +48,7 @@ Selector labels
 {{- define "agent-dash.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "agent-dash.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: app
 {{- end -}}
 
 {{/*
