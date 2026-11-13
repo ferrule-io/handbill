@@ -286,6 +286,60 @@ atomic: viewers see either the old version or the new one.
 One adapter interface with S3, GCS, and local filesystem implementations.
 Versions are stored as immutable file sets keyed by site id and version id.
 
+## Configuration
+
+The server reads only environment variables. Invalid configuration fails
+startup with one message listing every offending variable. The Helm chart
+sets exactly these.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LISTEN_ADDR` | `:8080` | HTTP listen address |
+| `APP_ORIGIN` | required | App origin, e.g. `https://dash.example.com`: scheme and host (optional port), no path |
+| `SITES_DOMAIN` | required | Parent domain of site hosts, e.g. `sites.example.com`; must not contain the app host |
+| `SECRET_KEY` | required | HMAC key for site cookies and upload URLs, at least 32 bytes |
+| `DATABASE_URL` | empty | PostgreSQL URL or libpq key/value DSN. When empty, the libpq variables `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE` are used |
+| `STORAGE_TYPE` | `local` | `local`, `s3`, or `gcs` |
+| `STORAGE_LOCAL_DIR` | `/data` | Root directory of the `local` adapter |
+| `S3_BUCKET`, `S3_REGION` | required for `s3` | Bucket and region |
+| `S3_ENDPOINT` | empty | Custom endpoint URL (e.g. MinIO) |
+| `S3_PREFIX` | empty | Key prefix |
+| `S3_FORCE_PATH_STYLE` | `false` | Path-style addressing (MinIO) |
+| `GCS_BUCKET` | required for `gcs` | Bucket |
+| `GCS_PREFIX` | empty | Key prefix |
+| `SMTP_HOST` | empty | Mail server; notifications are disabled when empty |
+| `SMTP_PORT` | by `SMTP_TLS`: 587, 465, 25 | Mail server port |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | empty | Set both or neither |
+| `SMTP_FROM` | required with `SMTP_HOST` | Sender, e.g. `agent-dash <dash@example.com>` |
+| `SMTP_TLS` | `starttls` | `starttls`, `tls` (implicit TLS), or `none` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | empty | Google sign-in; set both or neither (disabled when unset) |
+| `OAUTH_DCR_ENABLED` | `false` | Serve `/oauth/register` (Dynamic Client Registration) |
+| `INVITE_TTL` | `336h` | Lifetime of invites and ownership transfers (Go duration) |
+
+- S3 credentials come from the AWS SDK default chain (environment, shared
+  config, web identity / IRSA, instance role); GCS credentials from
+  Application Default Credentials (including workload identity).
+- Booleans accept Go's `strconv.ParseBool` forms (`true`, `false`, `1`, `0`).
+
+Runtime contract:
+
+- The container listens on port 8080 and runs as UID/GID 65532 (distroless
+  `nonroot`); the `local` adapter writes under `/data`, which the image
+  creates owned by that user.
+- `GET /healthz` (liveness: the process serves HTTP) and `GET /readyz`
+  (readiness: the database and, once wired, storage answer within 3 s) respond
+  on any `Host`, because Kubernetes probes use the pod IP. On site hosts they
+  shadow site files at those two paths.
+- Requests are routed by `Host` (port ignored): `APP_ORIGIN`'s host serves the
+  app; `<id>.SITES_DOMAIN`, with `<id>` a valid site id, serves that site; any
+  other host gets 404.
+- Logs are JSON lines on stdout; query strings and `/_auth/` path tails are
+  never logged.
+
+Local development (`mise.toml` `[env]`, `compose.yaml`): the app runs on
+`http://dash.localhost:8080`, sites on `http://<id>.sites.localhost:8080`
+(browsers resolve `*.localhost` to loopback), and PostgreSQL on host port 55432.
+
 ## Deployment
 
 ### Image
