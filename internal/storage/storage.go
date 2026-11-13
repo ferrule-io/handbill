@@ -29,3 +29,9 @@ type Object = storagetype.Object
 func ValidKey(key string) error {
 	return storagetype.ValidKey(key)
 }
+
+// ValidPrefix checks that prefix is non-empty, relative, and follows key
+// segment rules (allowing an optional trailing slash).
+func ValidPrefix(prefix string) error {
+	return storagetype.ValidPrefix(prefix)
+}

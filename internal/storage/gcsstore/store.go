@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	gcs "cloud.google.com/go/storage"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
@@ -62,7 +61,8 @@ func (s *Store) gcsKey(key string) string {
 	return s.prefix + "/" + key
 }
 
-// Put writes an object to GCS.
+// Put writes an object to GCS. It uses a child context that is cancelled on any error
+// to avoid committing a partial object.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
 	if err := storagetype.ValidKey(key); err != nil {
 		return err
@@ -71,35 +71,49 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, co
 		contentType = "application/octet-stream"
 	}
 
+	wCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	obj := s.bucket.Object(s.gcsKey(key))
-	w := obj.NewWriter(ctx)
+	w := obj.NewWriter(wCtx)
 	w.ContentType = contentType
 
-	if _, err := io.Copy(w, r); err != nil {
-		_ = w.Close()
-		return fmt.Errorf("gcsstore: write object: %w", err)
+	var written int64
+	var err error
+	if size >= 0 {
+		written, err = io.CopyN(w, r, size)
+		if err != nil && !errors.Is(err, io.EOF) {
+			cancel()
+			_ = w.Close()
+			return fmt.Errorf("gcsstore: write object: %w", err)
+		}
+		if written != size {
+			cancel()
+			_ = w.Close()
+			return fmt.Errorf("gcsstore: short write: wrote %d of %d bytes", written, size)
+		}
+	} else {
+		written, err = io.Copy(w, r)
+		if err != nil {
+			cancel()
+			_ = w.Close()
+			return fmt.Errorf("gcsstore: write object: %w", err)
+		}
 	}
+
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("gcsstore: close writer: %w", err)
 	}
 	return nil
 }
 
-// Get opens an object from GCS for reading.
+// Get opens an object from GCS for reading and extracts metadata from reader attributes.
 func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error) {
 	if err := storagetype.ValidKey(key); err != nil {
 		return nil, err
 	}
 
 	obj := s.bucket.Object(s.gcsKey(key))
-	attrs, err := obj.Attrs(ctx)
-	if err != nil {
-		if isGCSNotFound(err) {
-			return nil, storagetype.ErrNotFound
-		}
-		return nil, fmt.Errorf("gcsstore: attrs: %w", err)
-	}
-
 	r, err := obj.NewReader(ctx)
 	if err != nil {
 		if isGCSNotFound(err) {
@@ -108,6 +122,7 @@ func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error
 		return nil, fmt.Errorf("gcsstore: reader: %w", err)
 	}
 
+	attrs := r.Attrs
 	return &storagetype.Object{
 		Info: storagetype.Info{
 			Size:        attrs.Size,
@@ -155,13 +170,13 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 
 // DeletePrefix removes every object whose key starts with prefix.
 func (s *Store) DeletePrefix(ctx context.Context, prefix string) error {
+	if err := storagetype.ValidPrefix(prefix); err != nil {
+		return err
+	}
+
 	fullPrefix := prefix
 	if s.prefix != "" {
-		if prefix == "" {
-			fullPrefix = s.prefix + "/"
-		} else {
-			fullPrefix = s.prefix + "/" + prefix
-		}
+		fullPrefix = s.prefix + "/" + prefix
 	}
 
 	it := s.bucket.Objects(ctx, &gcs.Query{Prefix: fullPrefix})
@@ -215,11 +230,18 @@ func (s *Store) DeletePrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
-// Ping checks that the GCS bucket exists and is accessible.
+// Ping checks that the GCS bucket is accessible via a 1-item object query under prefix.
+// This requires only object read permission and avoids requiring storage.buckets.get.
 func (s *Store) Ping(ctx context.Context) error {
-	_, err := s.bucket.Attrs(ctx)
-	if err != nil {
-		return fmt.Errorf("gcsstore: ping bucket %q: %w", s.name, err)
+	it := s.bucket.Objects(ctx, &gcs.Query{
+		Prefix: s.prefix,
+	})
+	_, err := it.Next()
+	if err != nil && !errors.Is(err, iterator.Done) {
+		if isGCSNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("gcsstore: ping: %w", err)
 	}
 	return nil
 }
@@ -228,12 +250,5 @@ func isGCSNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, gcs.ErrObjectNotExist) {
-		return true
-	}
-	var googleErr *googleapi.Error
-	if errors.As(err, &googleErr) && googleErr.Code == 404 {
-		return true
-	}
-	return false
+	return errors.Is(err, gcs.ErrObjectNotExist)
 }

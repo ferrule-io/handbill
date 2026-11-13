@@ -6,23 +6,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+
 	"github.com/mjquinlan2000/agent-dash/internal/config"
 	"github.com/mjquinlan2000/agent-dash/internal/storage/storagetype"
 )
 
 // Store implements storagetype.Store on AWS S3 or S3-compatible backends.
 type Store struct {
-	client *s3.Client
-	bucket string
-	prefix string
+	client   *s3.Client
+	uploader *manager.Uploader
+	bucket   string
+	prefix   string
 }
 
 // New creates an S3 store from configuration.
@@ -46,10 +48,13 @@ func New(ctx context.Context, cfg config.S3) (*Store, error) {
 		o.UsePathStyle = cfg.ForcePathStyle
 	})
 
+	uploader := manager.NewUploader(client)
+
 	return &Store{
-		client: client,
-		bucket: cfg.Bucket,
-		prefix: strings.Trim(cfg.Prefix, "/"),
+		client:   client,
+		uploader: uploader,
+		bucket:   cfg.Bucket,
+		prefix:   strings.Trim(cfg.Prefix, "/"),
 	}, nil
 }
 
@@ -60,7 +65,18 @@ func (s *Store) s3Key(key string) string {
 	return s.prefix + "/" + key
 }
 
-// Put writes an object to S3.
+type countedReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countedReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// Put writes an object to S3 using the manager Uploader (supports non-seekable streams).
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
 	if err := storagetype.ValidKey(key); err != nil {
 		return err
@@ -69,20 +85,30 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, co
 		contentType = "application/octet-stream"
 	}
 
+	bodyReader := r
+	var cr *countedReader
+	if size >= 0 {
+		cr = &countedReader{r: io.LimitReader(r, size)}
+		bodyReader = cr
+	}
+
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(s.s3Key(key)),
-		Body:        r,
+		Body:        bodyReader,
 		ContentType: aws.String(contentType),
 	}
-	if size >= 0 {
-		input.ContentLength = aws.Int64(size)
-	}
 
-	_, err := s.client.PutObject(ctx, input)
+	_, err := s.uploader.Upload(ctx, input)
 	if err != nil {
 		return fmt.Errorf("s3store: put object: %w", err)
 	}
+
+	if cr != nil && cr.n != size {
+		_ = s.Delete(ctx, key)
+		return fmt.Errorf("s3store: short read: read %d of %d bytes", cr.n, size)
+	}
+
 	return nil
 }
 
@@ -174,13 +200,13 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 
 // DeletePrefix removes every object whose key starts with prefix.
 func (s *Store) DeletePrefix(ctx context.Context, prefix string) error {
+	if err := storagetype.ValidPrefix(prefix); err != nil {
+		return err
+	}
+
 	fullPrefix := prefix
 	if s.prefix != "" {
-		if prefix == "" {
-			fullPrefix = s.prefix + "/"
-		} else {
-			fullPrefix = s.prefix + "/" + prefix
-		}
+		fullPrefix = s.prefix + "/" + prefix
 	}
 
 	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
@@ -258,13 +284,9 @@ func isS3NotFound(err error) bool {
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {
 		code := apiErr.ErrorCode()
-		if code == "NoSuchKey" || code == "NotFound" || code == "404" {
+		if code == "NoSuchKey" || code == "NotFound" {
 			return true
 		}
-	}
-	var respErr interface{ HTTPStatusCode() int }
-	if errors.As(err, &respErr) && respErr.HTTPStatusCode() == http.StatusNotFound {
-		return true
 	}
 	return false
 }

@@ -69,9 +69,6 @@ func TestS3(t *testing.T) {
 		if err != nil {
 			t.Fatalf("s3store.New: %v", err)
 		}
-		t.Cleanup(func() {
-			_ = s.DeletePrefix(context.Background(), "")
-		})
 		return s
 	})
 }

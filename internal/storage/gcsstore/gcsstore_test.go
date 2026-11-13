@@ -48,7 +48,6 @@ func TestGCS(t *testing.T) {
 			t.Fatalf("gcsstore.New: %v", err)
 		}
 		t.Cleanup(func() {
-			_ = s.DeletePrefix(context.Background(), "")
 			_ = s.Close()
 		})
 		return s

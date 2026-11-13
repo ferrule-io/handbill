@@ -5,6 +5,13 @@ import (
 	"os"
 	"testing"
 
+	gcs "cloud.google.com/go/storage"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"google.golang.org/api/option"
+
 	"github.com/mjquinlan2000/agent-dash/internal/config"
 	"github.com/mjquinlan2000/agent-dash/internal/storage"
 )
@@ -41,6 +48,36 @@ func TestValidKey(t *testing.T) {
 	}
 }
 
+func TestValidPrefix(t *testing.T) {
+	valid := []string{
+		"file",
+		"a/b/",
+		"sites/abc234/blobs/",
+		"dir/sub.dir",
+	}
+	for _, p := range valid {
+		if err := storage.ValidPrefix(p); err != nil {
+			t.Errorf("ValidPrefix(%q) = %v, want nil", p, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"/",
+		"/leading/slash",
+		"double//slash",
+		"has/./dot",
+		"has/../dotdot",
+		"back\\slash",
+		"nul\x00byte",
+	}
+	for _, p := range invalid {
+		if err := storage.ValidPrefix(p); err == nil {
+			t.Errorf("ValidPrefix(%q) = nil, want error", p)
+		}
+	}
+}
+
 func TestOpen(t *testing.T) {
 	ctx := context.Background()
 
@@ -73,6 +110,24 @@ func TestOpen(t *testing.T) {
 			_ = os.Setenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
 		}
 
+		awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
+			awsconfig.WithRegion("us-east-1"),
+			awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+				os.Getenv("AWS_ACCESS_KEY_ID"),
+				os.Getenv("AWS_SECRET_ACCESS_KEY"),
+				"",
+			)),
+		)
+		if err == nil {
+			client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+				o.BaseEndpoint = aws.String(endpoint)
+				o.UsePathStyle = true
+			})
+			_, _ = client.CreateBucket(ctx, &s3.CreateBucketInput{
+				Bucket: aws.String("agent-dash-test"),
+			})
+		}
+
 		s, err := storage.Open(ctx, config.Storage{
 			Type: config.StorageS3,
 			S3: config.S3{
@@ -100,6 +155,12 @@ func TestOpen(t *testing.T) {
 			t.Skip("TEST_GCS_EMULATOR_HOST not set; skipping GCS test")
 		}
 		_ = os.Setenv("STORAGE_EMULATOR_HOST", emulatorHost)
+
+		gcsClient, err := gcs.NewClient(ctx, option.WithoutAuthentication())
+		if err == nil {
+			_ = gcsClient.Bucket("agent-dash-test-bucket").Create(ctx, "test-project", nil)
+			_ = gcsClient.Close()
+		}
 
 		s, err := storage.Open(ctx, config.Storage{
 			Type: config.StorageGCS,

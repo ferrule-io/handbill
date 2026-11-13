@@ -15,6 +15,14 @@ import (
 	"github.com/mjquinlan2000/agent-dash/internal/storage"
 )
 
+type onlyReader struct {
+	r io.Reader
+}
+
+func (o onlyReader) Read(p []byte) (int, error) {
+	return o.r.Read(p)
+}
+
 // Run runs the contract test suite against the store returned by newStore.
 // newStore should return a store scoped with an isolated prefix or directory
 // so tests do not interfere with each other.
@@ -73,6 +81,116 @@ func Run(t *testing.T, newStore func(t *testing.T) storage.Store) {
 		if obj.ContentType != contentType {
 			t.Errorf("Get obj.ContentType = %q, want %q", obj.ContentType, contentType)
 		}
+	})
+
+	t.Run("NonSeekableReader", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+		key := "stream/archive-entry.bin"
+		content := "streaming content from non-seekable reader"
+		contentType := "application/octet-stream"
+
+		reader := onlyReader{r: strings.NewReader(content)}
+		if err := s.Put(ctx, key, reader, int64(len(content)), contentType); err != nil {
+			t.Fatalf("Put non-seekable failed: %v", err)
+		}
+
+		obj, err := s.Get(ctx, key)
+		if err != nil {
+			t.Fatalf("Get non-seekable failed: %v", err)
+		}
+		defer obj.Body.Close()
+
+		data, err := io.ReadAll(obj.Body)
+		if err != nil {
+			t.Fatalf("ReadAll failed: %v", err)
+		}
+		if string(data) != content {
+			t.Errorf("Get content = %q, want %q", string(data), content)
+		}
+	})
+
+	t.Run("ShortReader", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+		key := "aborted/short.bin"
+
+		// Size is declared as 100 bytes, but reader only supplies 20 bytes
+		shortContent := "12345678901234567890"
+		reader := onlyReader{r: strings.NewReader(shortContent)}
+		err := s.Put(ctx, key, reader, 100, "application/octet-stream")
+		if err == nil {
+			t.Fatalf("Put with short reader should fail, but got nil")
+		}
+
+		// Must leave no object behind
+		_, err = s.Stat(ctx, key)
+		if !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("Stat on short-written key should return ErrNotFound, got %v", err)
+		}
+		_, err = s.Get(ctx, key)
+		if !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("Get on short-written key should return ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("MetaKeyCoexist", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		keyA := "docs/a"
+		contentA := "hello a"
+		typeA := "text/plain"
+
+		keyAMeta := "docs/a.meta"
+		contentAMeta := "hello a.meta"
+		typeAMeta := "application/json"
+
+		if err := s.Put(ctx, keyA, strings.NewReader(contentA), int64(len(contentA)), typeA); err != nil {
+			t.Fatalf("Put %q failed: %v", keyA, err)
+		}
+		if err := s.Put(ctx, keyAMeta, strings.NewReader(contentAMeta), int64(len(contentAMeta)), typeAMeta); err != nil {
+			t.Fatalf("Put %q failed: %v", keyAMeta, err)
+		}
+
+		objA, err := s.Get(ctx, keyA)
+		if err != nil {
+			t.Fatalf("Get %q failed: %v", keyA, err)
+		}
+		dataA, _ := io.ReadAll(objA.Body)
+		objA.Body.Close()
+		if string(dataA) != contentA {
+			t.Errorf("%q content = %q, want %q", keyA, string(dataA), contentA)
+		}
+		if objA.ContentType != typeA {
+			t.Errorf("%q contentType = %q, want %q", keyA, objA.ContentType, typeA)
+		}
+
+		objAMeta, err := s.Get(ctx, keyAMeta)
+		if err != nil {
+			t.Fatalf("Get %q failed: %v", keyAMeta, err)
+		}
+		dataAMeta, _ := io.ReadAll(objAMeta.Body)
+		objAMeta.Body.Close()
+		if string(dataAMeta) != contentAMeta {
+			t.Errorf("%q content = %q, want %q", keyAMeta, string(dataAMeta), contentAMeta)
+		}
+		if objAMeta.ContentType != typeAMeta {
+			t.Errorf("%q contentType = %q, want %q", keyAMeta, objAMeta.ContentType, typeAMeta)
+		}
+
+		// Deleting keyA must leave keyAMeta intact
+		if err := s.Delete(ctx, keyA); err != nil {
+			t.Fatalf("Delete %q failed: %v", keyA, err)
+		}
+		if _, err := s.Get(ctx, keyA); !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("%q should be not found after delete", keyA)
+		}
+		objAMetaAfter, err := s.Get(ctx, keyAMeta)
+		if err != nil {
+			t.Fatalf("%q was corrupted or deleted after deleting %q: %v", keyAMeta, keyA, err)
+		}
+		objAMetaAfter.Body.Close()
 	})
 
 	t.Run("Overwrite", func(t *testing.T) {
@@ -158,6 +276,30 @@ func Run(t *testing.T, newStore func(t *testing.T) storage.Store) {
 			}
 			if err := s.Delete(ctx, k); err == nil {
 				t.Errorf("Delete invalid key %q should fail", k)
+			}
+		}
+	})
+
+	t.Run("DeletePrefixValidation", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		// Empty prefix must be rejected
+		if err := s.DeletePrefix(ctx, ""); !errors.Is(err, storage.ErrInvalidKey) {
+			t.Errorf("DeletePrefix(\"\") = %v, want ErrInvalidKey", err)
+		}
+
+		invalidPrefixes := []string{
+			"/leading/slash",
+			"double//slash",
+			"has/./dot",
+			"has/../dotdot",
+			"back\\slash",
+			"nul\x00byte",
+		}
+		for _, p := range invalidPrefixes {
+			if err := s.DeletePrefix(ctx, p); !errors.Is(err, storage.ErrInvalidKey) {
+				t.Errorf("DeletePrefix(%q) = %v, want ErrInvalidKey", p, err)
 			}
 		}
 	})

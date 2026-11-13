@@ -75,3 +75,37 @@ func ValidKey(key string) error {
 	}
 	return nil
 }
+
+// ValidPrefix validates that prefix is non-empty, relative, and follows key
+// segment rules (allowing an optional trailing slash).
+func ValidPrefix(prefix string) error {
+	if prefix == "" {
+		return fmt.Errorf("%w: prefix is empty", ErrInvalidKey)
+	}
+	if strings.ContainsRune(prefix, 0) {
+		return fmt.Errorf("%w: prefix contains NUL byte", ErrInvalidKey)
+	}
+	if strings.Contains(prefix, "\\") {
+		return fmt.Errorf("%w: prefix contains backslash", ErrInvalidKey)
+	}
+	if strings.HasPrefix(prefix, "/") {
+		return fmt.Errorf("%w: prefix has leading slash", ErrInvalidKey)
+	}
+	p := strings.TrimSuffix(prefix, "/")
+	if p == "" {
+		return fmt.Errorf("%w: prefix has empty segments", ErrInvalidKey)
+	}
+	parts := strings.Split(p, "/")
+	for _, part := range parts {
+		if part == "" {
+			return fmt.Errorf("%w: prefix contains empty segment", ErrInvalidKey)
+		}
+		if part == "." {
+			return fmt.Errorf("%w: prefix contains '.' segment", ErrInvalidKey)
+		}
+		if part == ".." {
+			return fmt.Errorf("%w: prefix contains '..' segment", ErrInvalidKey)
+		}
+	}
+	return nil
+}

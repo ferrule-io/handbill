@@ -25,7 +25,6 @@ type Store struct {
 
 type metadata struct {
 	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
 }
 
 // New opens or creates a local store at root.
@@ -34,8 +33,10 @@ func New(dir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("local: abs path: %w", err)
 	}
-	if err := os.MkdirAll(abs, 0755); err != nil {
-		return nil, fmt.Errorf("local: mkdir root: %w", err)
+	for _, sub := range []string{"objects", "meta", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(abs, sub), 0755); err != nil {
+			return nil, fmt.Errorf("local: mkdir %s: %w", sub, err)
+		}
 	}
 	rootFS, err := os.OpenRoot(abs)
 	if err != nil {
@@ -55,18 +56,22 @@ func (s *Store) Close() error {
 	return nil
 }
 
-func metaKey(key string) string {
-	return key + ".meta"
-}
-
 func randomSuffix() string {
 	var buf [8]byte
 	_, _ = rand.Read(buf[:])
 	return hex.EncodeToString(buf[:])
 }
 
-// Put writes an object atomically: writes to temp files in the same directory,
-// fsyncs, and renames.
+func objectRelPath(key string) string {
+	return filepath.Join("objects", filepath.FromSlash(key))
+}
+
+func metaRelPath(key string) string {
+	return filepath.Join("meta", filepath.FromSlash(key))
+}
+
+// Put writes an object atomically: writes to temp files in tmp/, fsyncs,
+// and renames into objects/ and meta/.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
 	if err := storagetype.ValidKey(key); err != nil {
 		return err
@@ -78,17 +83,23 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, co
 		return err
 	}
 
-	dir := filepath.Dir(key)
-	base := filepath.Base(key)
-	if dir != "." {
+	objRel := objectRelPath(key)
+	metaRel := metaRelPath(key)
+
+	if dir := filepath.Dir(objRel); dir != "objects" {
 		if err := s.rootFS.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("local: mkdir %q: %w", dir, err)
+			return fmt.Errorf("local: mkdir objects: %w", err)
+		}
+	}
+	if dir := filepath.Dir(metaRel); dir != "meta" {
+		if err := s.rootFS.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("local: mkdir meta: %w", err)
 		}
 	}
 
 	randPart := randomSuffix()
-	tmpDataName := filepath.Join(dir, fmt.Sprintf(".tmp-%s-data-%s", base, randPart))
-	tmpMetaName := filepath.Join(dir, fmt.Sprintf(".tmp-%s-meta-%s", base, randPart))
+	tmpDataName := filepath.Join("tmp", "data-"+randPart)
+	tmpMetaName := filepath.Join("tmp", "meta-"+randPart)
 
 	tmpData, err := s.rootFS.OpenFile(tmpDataName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
@@ -108,7 +119,7 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, co
 			return fmt.Errorf("local: write data: %w", err)
 		}
 		if written != size {
-			return fmt.Errorf("local: short write: wrote %d of %d bytes", written, size)
+			return fmt.Errorf("local: short read: read %d of %d bytes", written, size)
 		}
 	} else {
 		written, err = io.Copy(tmpData, r)
@@ -123,12 +134,11 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, co
 	if err := tmpData.Close(); err != nil {
 		return fmt.Errorf("local: close data: %w", err)
 	}
-	tmpData = nil // prevented cleanup remove of data
+	tmpData = nil
 
-	// Write sidecar metadata
+	// Write metadata file
 	meta := metadata{
 		ContentType: contentType,
-		Size:        written,
 	}
 	metaBytes, err := json.Marshal(meta)
 	if err != nil {
@@ -162,14 +172,15 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64, co
 	}
 	tmpMeta = nil
 
-	// Rename sidecar then data
-	if err := s.rootFS.Rename(tmpMetaName, metaKey(key)); err != nil {
+	// Rename metadata then data atomically
+	if err := s.rootFS.Rename(tmpMetaName, metaRel); err != nil {
 		_ = s.rootFS.Remove(tmpDataName)
 		_ = s.rootFS.Remove(tmpMetaName)
 		return fmt.Errorf("local: rename meta: %w", err)
 	}
-	if err := s.rootFS.Rename(tmpDataName, key); err != nil {
+	if err := s.rootFS.Rename(tmpDataName, objRel); err != nil {
 		_ = s.rootFS.Remove(tmpDataName)
+		_ = s.rootFS.Remove(metaRel)
 		return fmt.Errorf("local: rename data: %w", err)
 	}
 
@@ -185,7 +196,7 @@ func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error
 		return nil, err
 	}
 
-	f, err := s.rootFS.Open(key)
+	f, err := s.rootFS.Open(objectRelPath(key))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
 			return nil, storagetype.ErrNotFound
@@ -203,12 +214,12 @@ func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error
 		return nil, storagetype.ErrNotFound
 	}
 
-	meta := s.readMeta(key, fi.Size())
+	contentType := s.readContentType(key)
 
 	return &storagetype.Object{
 		Info: storagetype.Info{
-			Size:        meta.Size,
-			ContentType: meta.ContentType,
+			Size:        fi.Size(),
+			ContentType: contentType,
 		},
 		Body: f,
 	}, nil
@@ -223,7 +234,7 @@ func (s *Store) Stat(ctx context.Context, key string) (storagetype.Info, error) 
 		return storagetype.Info{}, err
 	}
 
-	fi, err := s.rootFS.Stat(key)
+	fi, err := s.rootFS.Stat(objectRelPath(key))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
 			return storagetype.Info{}, storagetype.ErrNotFound
@@ -234,34 +245,26 @@ func (s *Store) Stat(ctx context.Context, key string) (storagetype.Info, error) 
 		return storagetype.Info{}, storagetype.ErrNotFound
 	}
 
-	meta := s.readMeta(key, fi.Size())
+	contentType := s.readContentType(key)
 	return storagetype.Info{
-		Size:        meta.Size,
-		ContentType: meta.ContentType,
+		Size:        fi.Size(),
+		ContentType: contentType,
 	}, nil
 }
 
-func (s *Store) readMeta(key string, fallbackSize int64) metadata {
-	meta := metadata{
-		ContentType: "application/octet-stream",
-		Size:        fallbackSize,
-	}
-	data, err := s.rootFS.ReadFile(metaKey(key))
+func (s *Store) readContentType(key string) string {
+	contentType := "application/octet-stream"
+	data, err := s.rootFS.ReadFile(metaRelPath(key))
 	if err == nil {
 		var m metadata
-		if err := json.Unmarshal(data, &m); err == nil {
-			if m.ContentType != "" {
-				meta.ContentType = m.ContentType
-			}
-			if m.Size >= 0 {
-				meta.Size = m.Size
-			}
+		if err := json.Unmarshal(data, &m); err == nil && m.ContentType != "" {
+			contentType = m.ContentType
 		}
 	}
-	return meta
+	return contentType
 }
 
-// Delete removes an object and its sidecar metadata.
+// Delete removes an object and its metadata.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if err := storagetype.ValidKey(key); err != nil {
 		return err
@@ -270,79 +273,81 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return err
 	}
 
-	_ = s.rootFS.Remove(key)
-	_ = s.rootFS.Remove(metaKey(key))
+	_ = s.rootFS.Remove(objectRelPath(key))
+	_ = s.rootFS.Remove(metaRelPath(key))
 	return nil
 }
 
 // DeletePrefix removes every object whose key starts with prefix.
 func (s *Store) DeletePrefix(ctx context.Context, prefix string) error {
+	if err := storagetype.ValidPrefix(prefix); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	cleanPrefix := filepath.ToSlash(prefix)
+	for _, sub := range []string{"objects", "meta"} {
+		if err := s.deletePrefixSubdir(sub, prefix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	// If prefix is empty, remove all contents of root
-	if cleanPrefix == "" {
-		entries, err := os.ReadDir(s.rootPath)
-		if err != nil {
-			return fmt.Errorf("local: read root: %w", err)
-		}
-		for _, e := range entries {
-			if err := os.RemoveAll(filepath.Join(s.rootPath, e.Name())); err != nil {
-				return fmt.Errorf("local: remove root entry %q: %w", e.Name(), err)
-			}
-		}
+func (s *Store) deletePrefixSubdir(sub, prefix string) error {
+	cleanPrefix := filepath.ToSlash(prefix)
+	subDir := filepath.Join(s.rootPath, sub)
+
+	if strings.HasSuffix(cleanPrefix, "/") {
+		// Target is an exact directory subtree
+		dirPath := filepath.Join(subDir, filepath.FromSlash(strings.TrimSuffix(cleanPrefix, "/")))
+		_ = os.RemoveAll(dirPath)
+		s.pruneAncestors(subDir, filepath.Dir(dirPath))
 		return nil
 	}
 
-	// Walk from rootPath and remove matching files and directories
-	var pathsToRemove []string
-	err := filepath.WalkDir(s.rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if path == s.rootPath {
+	// Target may be a directory or file prefix in parent dir
+	parentDir := filepath.Dir(cleanPrefix)
+	basePrefix := filepath.Base(cleanPrefix)
+	var searchDir string
+	if parentDir == "." {
+		searchDir = subDir
+	} else {
+		searchDir = filepath.Join(subDir, filepath.FromSlash(parentDir))
+	}
+
+	entries, err := os.ReadDir(searchDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		rel, err := filepath.Rel(s.rootPath, path)
-		if err != nil {
-			return err
-		}
-		relSlash := filepath.ToSlash(rel)
-
-		// Check if relSlash or without .meta suffix starts with cleanPrefix
-		targetKey := strings.TrimSuffix(relSlash, ".meta")
-		if strings.HasPrefix(relSlash, cleanPrefix) || strings.HasPrefix(targetKey, cleanPrefix) {
-			pathsToRemove = append(pathsToRemove, path)
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("local: walk for delete prefix: %w", err)
+		return fmt.Errorf("local: read dir %q: %w", searchDir, err)
 	}
 
-	// Remove collected paths
-	for _, p := range pathsToRemove {
-		_ = os.RemoveAll(p)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), basePrefix) {
+			target := filepath.Join(searchDir, entry.Name())
+			_ = os.RemoveAll(target)
+		}
 	}
 
-	// Clean up any empty parent directories under rootPath
-	_ = filepath.WalkDir(s.rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() && path != s.rootPath {
-			_ = os.Remove(path) // Only removes if empty
-		}
-		return nil
-	})
-
+	s.pruneAncestors(subDir, searchDir)
 	return nil
+}
+
+func (s *Store) pruneAncestors(baseDir, startDir string) {
+	curr := startDir
+	for {
+		if curr == baseDir || !strings.HasPrefix(curr, baseDir) {
+			break
+		}
+		// Attempt to remove directory (only succeeds if empty)
+		if err := os.Remove(curr); err != nil {
+			break
+		}
+		curr = filepath.Dir(curr)
+	}
 }
 
 // Ping verifies the storage root directory is writable.
@@ -350,11 +355,11 @@ func (s *Store) Ping(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(s.rootPath, ".ping-*")
+	tmpName := filepath.Join(s.rootPath, "tmp", ".ping-"+randomSuffix())
+	f, err := os.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("local: ping write check failed: %w", err)
 	}
-	tmpName := f.Name()
 	_ = f.Close()
 	_ = os.Remove(tmpName)
 	return nil
