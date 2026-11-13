@@ -1,0 +1,117 @@
+"use client"
+
+import { ArrowUpRightIcon, LayersIcon, RefreshCwIcon } from "lucide-react"
+import Link from "next/link"
+
+import { McpEndpoint } from "@/components/home/mcp-endpoint"
+import { EmptyState } from "@/components/layout/empty-state"
+import { relativeTime, roleLabel, useApi, type Site } from "@/components/site/data"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+
+/** The signed-in user's sites: owned, managed, and shared with them. */
+export function SiteList() {
+  const [load, reload] = useApi<{ sites: Site[] }>("/app-api/sites")
+
+  if (load.state === "loading") {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading sites">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex h-44 flex-col gap-3 rounded-2xl bg-card p-5 ring-1 ring-border">
+            <Skeleton className="h-5 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="mt-auto h-3 w-1/3" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (load.state === "error") {
+    return (
+      <EmptyState
+        title="Couldn’t load your sites"
+        actions={
+          <Button variant="outline" onClick={reload}>
+            <RefreshCwIcon /> Try again
+          </Button>
+        }
+      >
+        <p>{load.error.message}</p>
+      </EmptyState>
+    )
+  }
+  const sites = load.data.sites
+  if (sites.length === 0) {
+    return (
+      <EmptyState icon={<LayersIcon />} title="Nothing on the press yet" className="py-16">
+        <p>
+          Agents create and publish sites over MCP. Add this server’s endpoint to an MCP client such
+          as Claude Code, sign in when it asks, then ask your agent to publish a site. It shows up
+          here with a private link you can share.
+        </p>
+        <McpEndpoint className="mt-5" />
+      </EmptyState>
+    )
+  }
+  return (
+    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="site-list">
+      {sites.map((site) => (
+        <li key={site.id}>
+          <SiteCard site={site} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function SiteCard({ site }: { site: Site }) {
+  const host = new URL(site.url).host
+  return (
+    <article className="group/site relative flex h-full min-h-44 flex-col gap-3 rounded-2xl bg-card p-5 shadow-press ring-1 ring-border transition-[box-shadow,transform] hover:-translate-y-0.5 hover:ring-foreground/20 focus-within:ring-ring">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="min-w-0 text-lg leading-snug font-medium text-pretty">
+          <Link
+            href={`/site?id=${site.id}`}
+            className="outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:underline"
+            data-testid="site-card-link"
+          >
+            {site.title}
+          </Link>
+        </h3>
+        <Badge variant={site.role === "viewer" ? "secondary" : "outline"} className="shrink-0">
+          {roleLabel[site.role]}
+        </Badge>
+      </div>
+      {site.description ? (
+        <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{site.description}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground/70 italic">No description</p>
+      )}
+      <div className="mt-auto flex items-center justify-between gap-3 pt-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate font-mono text-xs text-muted-foreground">{host}</span>
+          <span className="text-xs text-muted-foreground">
+            {site.currentVersionId ? (
+              <>Updated {relativeTime(site.updatedAt)}</>
+            ) : (
+              <span className="text-brand">Not published yet</span>
+            )}
+          </span>
+        </div>
+        {site.currentVersionId && (
+          <Button
+            asChild
+            variant="ghost"
+            size="icon-sm"
+            className="relative z-10 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <a href={site.url} target="_blank" rel="noreferrer" aria-label={`Open ${site.title}`}>
+              <ArrowUpRightIcon />
+            </a>
+          </Button>
+        )}
+      </div>
+    </article>
+  )
+}

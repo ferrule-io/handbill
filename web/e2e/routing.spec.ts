@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test"
 
-import { signUp, uniqueEmail, VirtualAuthenticator } from "./support/passkeys"
+import { seed, signIn, siteOrigin, uniqueEmail } from "./support/seed"
 
 // Routing acceptance check (docs/design.md, "Frontend"): fixed routes with
-// ids chosen at runtime must render on direct load and on client-side
+// ids created at runtime must render on direct load and on client-side
 // <Link> navigation; unknown paths get the export's 404; site hosts never
 // serve the UI.
 
@@ -27,24 +27,33 @@ async function expectSameDocument(page: Page) {
   expect(await page.evaluate(() => (window as unknown as { __spa?: boolean }).__spa)).toBe(true)
 }
 
-// App pages need a signed-in user (the shell redirects to /login otherwise).
-test.beforeEach(async ({ page }) => {
+// A site created at runtime, and its owner's session.
+let id: string
+let session: string
+
+test.beforeAll(async () => {
+  test.setTimeout(180_000)
+  const owner = uniqueEmail("routing")
+  const out = seed({ users: [{ email: owner }], sites: [{ owner, title: "Routing check" }] })
+  id = out.sites[0].id
+  session = out.users[owner].sessionToken
+})
+
+test.beforeEach(async ({ page, context, baseURL }) => {
   page.on("pageerror", (err) => {
     throw err
   })
-  await VirtualAuthenticator.attach(page)
-  await signUp(page, uniqueEmail("routing"))
+  await signIn(context, baseURL!, session)
 })
 
 test("direct load of /site?id=… renders the runtime id", async ({ page }) => {
-  const id = randomSiteId()
   const res = await page.goto(`/site?id=${id}`)
   expect(res?.status()).toBe(200)
   await expect(page.getByTestId("site-id")).toHaveText(id)
+  await expect(page.getByTestId("site-title")).toHaveText("Routing check")
 })
 
 test("<Link> navigation to /site?id=… renders the runtime id", async ({ page }) => {
-  const id = randomSiteId()
   await page.goto("/")
   await markDocument(page)
   await page.getByLabel("Site id").fill(id)
@@ -73,7 +82,6 @@ test("<Link> navigation to /invite#token=… renders the runtime token", async (
 })
 
 test("client navigation between fixed routes keeps the document", async ({ page }) => {
-  const id = randomSiteId()
   await page.goto(`/site?id=${id}`)
   await markDocument(page)
   await page.getByRole("link", { name: "Security" }).click()
@@ -92,13 +100,21 @@ test("unknown paths return the export's 404 page with status 404", async ({ page
   }
 })
 
-test("site hosts do not serve the UI", async ({ page, baseURL }) => {
-  const app = new URL(baseURL!)
-  const sitesDomain = process.env.SITES_DOMAIN ?? "sites.localhost"
-  const siteOrigin = `${app.protocol}//${randomSiteId()}.${sitesDomain}${app.port ? `:${app.port}` : ""}`
-  for (const path of ["/", "/site", "/_next/static/", "/404.html"]) {
-    const res = await page.goto(siteOrigin + path)
-    expect(res?.status(), path).toBe(404)
-    expect(await res?.text()).not.toContain("__next")
+test("site hosts do not serve the UI", async ({ request, baseURL }) => {
+  // Without a site cookie every path, existing site or not, is sent to the
+  // app's sign-in handoff; nothing of the UI is served from a site host.
+  for (const siteId of [id, randomSiteId()]) {
+    const origin = siteOrigin(baseURL!, siteId)
+    for (const path of ["/", "/site", "/_next/static/", "/404.html", "/healthz"]) {
+      const res = await request.get(origin + path, { maxRedirects: 0 })
+      expect(res.status(), path).toBe(302)
+      const loc = new URL(res.headers()["location"])
+      expect(loc.origin + loc.pathname, path).toBe(`${baseURL}/auth/site`)
+      expect(loc.searchParams.get("site")).toBe(siteId)
+      expect(loc.searchParams.get("return")).toBe(path)
+      expect(await res.text()).not.toContain("__next")
+    }
+    const reserved = await request.get(origin + "/_auth/anything", { maxRedirects: 0 })
+    expect(reserved.status()).toBe(404)
   }
 })
