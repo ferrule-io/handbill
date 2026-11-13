@@ -32,6 +32,20 @@ jobs:
           - 4443:4443
         options: >-
           -scheme http -port 4443 -public-host 127.0.0.1:4443 -external-url http://127.0.0.1:4443
+      # The oldest PostgreSQL the schema supports (the Helm chart bundles 17).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: agentdash
+          POSTGRES_PASSWORD: agentdash
+          POSTGRES_DB: agentdash
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentdash -d agentdash"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://agentdash:agentdash@127.0.0.1:5432/agentdash?sslmode=disable
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -39,6 +53,14 @@ jobs:
           go-version-file: go.mod
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - uses: sqlc-dev/setup-sqlc@v4
+        with:
+          sqlc-version: "1.31.1"
+      - name: sqlc generated code is current
+        run: |
+          sqlc generate -f internal/db/sqlc.yaml
+          git add -N internal/db
+          git diff --exit-code -- internal/db
       - run: go vet ./...
       - run: go test -race ./...
         env:
@@ -73,6 +95,19 @@ jobs:
   image:
     name: Image build and routing acceptance
     runs-on: ubuntu-latest
+    services:
+      # The server applies migrations at startup and exits without a database.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: agentdash
+          POSTGRES_PASSWORD: agentdash
+          POSTGRES_DB: agentdash
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentdash -d agentdash"
+          --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
@@ -85,11 +120,11 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Start container
         run: |
-          docker run -d --name agent-dash -p 8080:8080 \
+          docker run -d --name agent-dash --network host \
             -e APP_ORIGIN=http://dash.localhost:8080 \
             -e SITES_DOMAIN=sites.localhost \
             -e SECRET_KEY="$(openssl rand -base64 48)" \
-            -e DATABASE_URL=postgres://agentdash@127.0.0.1:5432/agentdash \
+            -e DATABASE_URL='postgres://agentdash:agentdash@127.0.0.1:5432/agentdash?sslmode=disable' \
             agent-dash:ci
           for _ in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8080/healthz && exit 0
