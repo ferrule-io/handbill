@@ -59,7 +59,9 @@ func TestHostRouting(t *testing.T) {
 		{"example.com", "/", 404, ""},
 		{"10.0.0.7:8080", "/", 404, ""},
 		{"10.0.0.7:8080", "/healthz", 200, "ok\n"},
-		{"abcdefghijkl.sites.localhost", "/healthz", 200, "ok\n"},
+		{"example.com", "/healthz", 200, "ok\n"},
+		{"abcdefghijkl.sites.localhost", "/healthz", 200, "site abcdefghijkl /healthz"},
+		{"abcdefghijkl.sites.localhost", "/readyz", 200, "site abcdefghijkl /readyz"},
 		{"dash.localhost", "/readyz", 200, "ok\n"},
 	}
 	for _, tt := range tests {

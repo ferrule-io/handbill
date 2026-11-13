@@ -85,6 +85,22 @@ func (q *Queries) CreateSite(ctx context.Context, arg CreateSiteParams) (Site, e
 	return i, err
 }
 
+const createSiteBlob = `-- name: CreateSiteBlob :exec
+INSERT INTO site_blobs (site_id, sha256, size) VALUES ($1, $2, $3)
+ON CONFLICT (site_id, sha256) DO NOTHING
+`
+
+type CreateSiteBlobParams struct {
+	SiteID string
+	Sha256 []byte
+	Size   int64
+}
+
+func (q *Queries) CreateSiteBlob(ctx context.Context, arg CreateSiteBlobParams) error {
+	_, err := q.db.Exec(ctx, createSiteBlob, arg.SiteID, arg.Sha256, arg.Size)
+	return err
+}
+
 const createSiteTicket = `-- name: CreateSiteTicket :one
 INSERT INTO site_tickets (id, token_hash, site_id, user_id, return_path, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -124,8 +140,8 @@ func (q *Queries) CreateSiteTicket(ctx context.Context, arg CreateSiteTicketPara
 }
 
 const createVersion = `-- name: CreateVersion :one
-INSERT INTO versions (id, site_id, published_by)
-VALUES ($1, $2, $3)
+INSERT INTO versions (id, site_id, published_by, created_at)
+VALUES ($1, $2, $3, clock_timestamp())
 RETURNING id, site_id, published_by, created_at
 `
 
@@ -135,6 +151,9 @@ type CreateVersionParams struct {
 	PublishedBy uuid.NullUUID
 }
 
+// CreateVersion stamps clock_timestamp(), not the transaction start: a
+// finalize waits for the site lock first, so creation times follow the
+// order versions became current.
 func (q *Queries) CreateVersion(ctx context.Context, arg CreateVersionParams) (Version, error) {
 	row := q.db.QueryRow(ctx, createVersion, arg.ID, arg.SiteID, arg.PublishedBy)
 	var i Version
@@ -183,6 +202,54 @@ func (q *Queries) DeleteSite(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const findVersionFile = `-- name: FindVersionFile :one
+SELECT path, blob_sha256, size, content_type FROM version_files
+WHERE version_id = $1 AND path = ANY($2::text[])
+ORDER BY array_position($2::text[], path)
+LIMIT 1
+`
+
+type FindVersionFileParams struct {
+	VersionID uuid.UUID
+	Paths     []string
+}
+
+type FindVersionFileRow struct {
+	Path        string
+	BlobSha256  []byte
+	Size        int64
+	ContentType string
+}
+
+// FindVersionFile returns the first of paths (in order) present in a version.
+func (q *Queries) FindVersionFile(ctx context.Context, arg FindVersionFileParams) (FindVersionFileRow, error) {
+	row := q.db.QueryRow(ctx, findVersionFile, arg.VersionID, arg.Paths)
+	var i FindVersionFileRow
+	err := row.Scan(
+		&i.Path,
+		&i.BlobSha256,
+		&i.Size,
+		&i.ContentType,
+	)
+	return i, err
+}
+
+const getMemberRole = `-- name: GetMemberRole :one
+SELECT role FROM memberships WHERE site_id = $1 AND user_id = $2
+`
+
+type GetMemberRoleParams struct {
+	SiteID string
+	UserID uuid.UUID
+}
+
+func (q *Queries) GetMemberRole(ctx context.Context, arg GetMemberRoleParams) (string, error) {
+	row := q.db.QueryRow(ctx, getMemberRole, arg.SiteID, arg.UserID)
+	var role string
+	err := row.Scan(&role)
+	return role, err
+}
+
 const getSite = `-- name: GetSite :one
 SELECT id, title, description, owner_id, owner_role, current_version_id, created_at, updated_at FROM sites WHERE id = $1
 `
@@ -203,6 +270,259 @@ func (q *Queries) GetSite(ctx context.Context, id string) (Site, error) {
 	return i, err
 }
 
+const getSiteAccess = `-- name: GetSiteAccess :one
+SELECT s.id, s.current_version_id, m.role, pl.enabled AS public_link_enabled, pl.generation AS public_link_generation
+FROM sites s
+LEFT JOIN memberships m ON m.site_id = s.id AND m.user_id = $1
+LEFT JOIN public_links pl ON pl.site_id = s.id
+WHERE s.id = $2
+`
+
+type GetSiteAccessParams struct {
+	UserID uuid.UUID
+	SiteID string
+}
+
+type GetSiteAccessRow struct {
+	ID                   string
+	CurrentVersionID     uuid.NullUUID
+	Role                 *string
+	PublicLinkEnabled    *bool
+	PublicLinkGeneration *int64
+}
+
+// GetSiteAccess is the per-request state the site file server checks a site
+// cookie against; role and public-link columns are NULL when absent.
+func (q *Queries) GetSiteAccess(ctx context.Context, arg GetSiteAccessParams) (GetSiteAccessRow, error) {
+	row := q.db.QueryRow(ctx, getSiteAccess, arg.UserID, arg.SiteID)
+	var i GetSiteAccessRow
+	err := row.Scan(
+		&i.ID,
+		&i.CurrentVersionID,
+		&i.Role,
+		&i.PublicLinkEnabled,
+		&i.PublicLinkGeneration,
+	)
+	return i, err
+}
+
+const getSiteForUpdate = `-- name: GetSiteForUpdate :one
+SELECT id, title, description, owner_id, owner_role, current_version_id, created_at, updated_at FROM sites WHERE id = $1 FOR UPDATE
+`
+
+// GetSiteForUpdate locks the site row; Finalize holds it so concurrent merge
+// publishes build on each other's versions instead of the same base.
+func (q *Queries) GetSiteForUpdate(ctx context.Context, id string) (Site, error) {
+	row := q.db.QueryRow(ctx, getSiteForUpdate, id)
+	var i Site
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.OwnerID,
+		&i.OwnerRole,
+		&i.CurrentVersionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getVersion = `-- name: GetVersion :one
+SELECT v.id, v.site_id, v.published_by, v.created_at,
+       count(f.path)::int AS file_count,
+       coalesce(sum(f.size), 0)::bigint AS size,
+       e.email AS publisher_email
+FROM versions v
+LEFT JOIN version_files f ON f.version_id = v.id
+LEFT JOIN emails e ON e.user_id = v.published_by AND e.is_primary
+WHERE v.id = $1 AND v.site_id = $2
+GROUP BY v.id, e.email
+`
+
+type GetVersionParams struct {
+	ID     uuid.UUID
+	SiteID string
+}
+
+type GetVersionRow struct {
+	ID             uuid.UUID
+	SiteID         string
+	PublishedBy    uuid.NullUUID
+	CreatedAt      time.Time
+	FileCount      int32
+	Size           int64
+	PublisherEmail *string
+}
+
+func (q *Queries) GetVersion(ctx context.Context, arg GetVersionParams) (GetVersionRow, error) {
+	row := q.db.QueryRow(ctx, getVersion, arg.ID, arg.SiteID)
+	var i GetVersionRow
+	err := row.Scan(
+		&i.ID,
+		&i.SiteID,
+		&i.PublishedBy,
+		&i.CreatedAt,
+		&i.FileCount,
+		&i.Size,
+		&i.PublisherEmail,
+	)
+	return i, err
+}
+
+const listSitesForUser = `-- name: ListSitesForUser :many
+SELECT sites.id, sites.title, sites.description, sites.owner_id, sites.owner_role, sites.current_version_id, sites.created_at, sites.updated_at, m.role
+FROM memberships m
+JOIN sites ON sites.id = m.site_id
+WHERE m.user_id = $1
+ORDER BY sites.updated_at DESC, sites.id
+`
+
+type ListSitesForUserRow struct {
+	Site Site
+	Role string
+}
+
+func (q *Queries) ListSitesForUser(ctx context.Context, userID uuid.UUID) ([]ListSitesForUserRow, error) {
+	rows, err := q.db.Query(ctx, listSitesForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSitesForUserRow
+	for rows.Next() {
+		var i ListSitesForUserRow
+		if err := rows.Scan(
+			&i.Site.ID,
+			&i.Site.Title,
+			&i.Site.Description,
+			&i.Site.OwnerID,
+			&i.Site.OwnerRole,
+			&i.Site.CurrentVersionID,
+			&i.Site.CreatedAt,
+			&i.Site.UpdatedAt,
+			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVersionFiles = `-- name: ListVersionFiles :many
+SELECT path, blob_sha256, size, content_type FROM version_files
+WHERE version_id = $1
+ORDER BY path
+`
+
+type ListVersionFilesRow struct {
+	Path        string
+	BlobSha256  []byte
+	Size        int64
+	ContentType string
+}
+
+func (q *Queries) ListVersionFiles(ctx context.Context, versionID uuid.UUID) ([]ListVersionFilesRow, error) {
+	rows, err := q.db.Query(ctx, listVersionFiles, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVersionFilesRow
+	for rows.Next() {
+		var i ListVersionFilesRow
+		if err := rows.Scan(
+			&i.Path,
+			&i.BlobSha256,
+			&i.Size,
+			&i.ContentType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVersions = `-- name: ListVersions :many
+SELECT v.id, v.site_id, v.published_by, v.created_at,
+       count(f.path)::int AS file_count,
+       coalesce(sum(f.size), 0)::bigint AS size,
+       e.email AS publisher_email
+FROM versions v
+LEFT JOIN version_files f ON f.version_id = v.id
+LEFT JOIN emails e ON e.user_id = v.published_by AND e.is_primary
+WHERE v.site_id = $1
+GROUP BY v.id, e.email
+ORDER BY v.created_at DESC, v.id DESC
+`
+
+type ListVersionsRow struct {
+	ID             uuid.UUID
+	SiteID         string
+	PublishedBy    uuid.NullUUID
+	CreatedAt      time.Time
+	FileCount      int32
+	Size           int64
+	PublisherEmail *string
+}
+
+func (q *Queries) ListVersions(ctx context.Context, siteID string) ([]ListVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listVersions, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVersionsRow
+	for rows.Next() {
+		var i ListVersionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SiteID,
+			&i.PublishedBy,
+			&i.CreatedAt,
+			&i.FileCount,
+			&i.Size,
+			&i.PublisherEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const rollbackSite = `-- name: RollbackSite :execrows
+UPDATE sites SET current_version_id = $1::uuid, updated_at = now()
+WHERE sites.id = $2::text
+  AND EXISTS (SELECT 1 FROM versions v WHERE v.id = $1::uuid AND v.site_id = $2::text)
+`
+
+type RollbackSiteParams struct {
+	VersionID uuid.UUID
+	SiteID    string
+}
+
+// RollbackSite repoints the site to one of its own versions; no row when
+// either does not exist.
+func (q *Queries) RollbackSite(ctx context.Context, arg RollbackSiteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rollbackSite, arg.VersionID, arg.SiteID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setCurrentVersion = `-- name: SetCurrentVersion :execrows
 UPDATE sites SET current_version_id = $1, updated_at = now() WHERE id = $2
 `
@@ -218,4 +538,52 @@ func (q *Queries) SetCurrentVersion(ctx context.Context, arg SetCurrentVersionPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const siteBlobExists = `-- name: SiteBlobExists :one
+SELECT EXISTS (SELECT 1 FROM site_blobs WHERE site_id = $1 AND sha256 = $2)
+`
+
+type SiteBlobExistsParams struct {
+	SiteID string
+	Sha256 []byte
+}
+
+func (q *Queries) SiteBlobExists(ctx context.Context, arg SiteBlobExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, siteBlobExists, arg.SiteID, arg.Sha256)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const updateSite = `-- name: UpdateSite :one
+UPDATE sites
+SET title = coalesce($1, title),
+    description = coalesce($2, description),
+    updated_at = now()
+WHERE id = $3
+RETURNING id, title, description, owner_id, owner_role, current_version_id, created_at, updated_at
+`
+
+type UpdateSiteParams struct {
+	Title       *string
+	Description *string
+	ID          string
+}
+
+// UpdateSite changes the fields that are not NULL.
+func (q *Queries) UpdateSite(ctx context.Context, arg UpdateSiteParams) (Site, error) {
+	row := q.db.QueryRow(ctx, updateSite, arg.Title, arg.Description, arg.ID)
+	var i Site
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.OwnerID,
+		&i.OwnerRole,
+		&i.CurrentVersionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

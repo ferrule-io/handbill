@@ -1,6 +1,6 @@
 // Package server builds the root HTTP handler: it routes by Host to the app
 // mux (APP_ORIGIN's host) or the sites mux (<id>.SITES_DOMAIN), answers
-// /healthz and /readyz on any host, and 404s unknown hosts.
+// /healthz and /readyz on every non-site host, and 404s unknown hosts.
 //
 // Feature packages never edit this file. Each exposes a Module that registers
 // its own routes on Routes.App and/or Routes.Sites; cmd/agent-dash lists the
@@ -101,7 +101,14 @@ type root struct {
 }
 
 func (h *root) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Probes use the pod IP as Host, so health answers on every host.
+	host := Hostname(r.Host)
+	if id, ok := h.siteHost(host); ok {
+		// Site hosts serve their own content at every path, including
+		// /healthz and /readyz.
+		h.sites.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), siteIDKey{}, id)))
+		return
+	}
+	// Probes use the pod IP as Host, so health answers on every other host.
 	switch r.URL.Path {
 	case "/healthz":
 		h.healthz(w, r)
@@ -110,13 +117,8 @@ func (h *root) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.readyz(w, r)
 		return
 	}
-	host := Hostname(r.Host)
 	if host == h.deps.Config.AppHost {
 		h.app.ServeHTTP(w, r)
-		return
-	}
-	if id, ok := h.siteHost(host); ok {
-		h.sites.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), siteIDKey{}, id)))
 		return
 	}
 	http.NotFound(w, r)
