@@ -2,6 +2,74 @@
 
 Decisions here implement [INTENT.md](../INTENT.md).
 
+## Architecture
+
+One Go binary, one container image. No Node.js at runtime.
+
+```mermaid
+flowchart LR
+  agent[MCP client] -->|OAuth bearer| mcp["/mcp"]
+  browser[Browser] --> app["dash.example.com<br/>app UI + auth + OAuth"]
+  browser --> sites["*.sites.example.com<br/>site file server"]
+  subgraph bin[agent-dash binary]
+    mcp
+    app
+    sites
+  end
+  bin --> pg[(PostgreSQL)]
+  bin --> store[(S3 / GCS / local)]
+```
+
+The server routes by `Host`: `APP_ORIGIN` host serves the UI, auth, OAuth, and
+`/mcp`; any `<id>.SITES_DOMAIN` host serves that site's files.
+
+### Backend (Go)
+
+| Concern | Choice |
+|---|---|
+| HTTP routing | `net/http` `ServeMux` |
+| PostgreSQL | `pgx` with `sqlc`-generated queries |
+| Migrations | `goose`, embedded, run at startup |
+| Passkeys | `github.com/go-webauthn/webauthn` |
+| Google sign-in | `github.com/coreos/go-oidc` + `golang.org/x/oauth2` |
+| MCP | `github.com/modelcontextprotocol/go-sdk` (≥ 1.8) |
+| OAuth 2.1 authorization server | In-house, limited to authorization code + PKCE, refresh tokens, CIMD, optional DCR |
+| Storage | `aws-sdk-go-v2` (S3), `cloud.google.com/go/storage` (GCS), filesystem |
+
+### Frontend (Next.js)
+
+- Next.js App Router + TypeScript with `output: 'export'`; the build output is
+  embedded into the Go binary with `embed`. No SSR, server actions, or
+  middleware — all data comes from the Go JSON endpoints under `/app-api/`
+  (session-cookie authenticated, CSRF-protected; internal to the UI, not a
+  public API).
+- Dynamic routes (`/sites/<id>`, `/invite/<token>`) are exported as one shell
+  each; Go serves the shell for any matching path and the client reads the
+  parameter from the URL.
+- Tailwind CSS + shadcn/ui; `@simplewebauthn/browser` for passkey ceremonies.
+- Screens: sign-up, sign-in, recovery-code display and use, site list, site
+  detail (overview, members and invites, public link, versions, transfer,
+  delete), invite accept, OAuth consent, security settings (passkeys, Google
+  link, recovery codes, OAuth grants).
+
+### Site file server
+
+No rendering. For a request on `<id>.SITES_DOMAIN`: authorize (site cookie or
+handoff), resolve the path against the site's current version (`/` and
+directory paths → `index.html`; missing → the site's `404.html` if present,
+else a plain 404), and stream the object from storage with a content type from
+the extension and an ETag derived from the version.
+
+### Repository layout
+
+| Path | Contents |
+|---|---|
+| `cmd/agent-dash/` | Server entrypoint |
+| `internal/` | Go packages (http, auth, oauth, mcp, sites, storage, db) |
+| `web/` | Next.js app |
+| `deploy/helm/agent-dash/` | Helm chart |
+| `Dockerfile` | Multi-stage: build `web/`, build Go with embedded assets, distroless runtime |
+
 ## Origins and URLs
 
 Hosted sites contain agent-authored HTML and JS, so they never share an origin
@@ -37,6 +105,7 @@ with the app or with each other (URL option B).
 | `/oauth/authorize`, `/oauth/token` | OAuth 2.1 |
 | `/oauth/register` | Dynamic Client Registration; only when `OAUTH_DCR_ENABLED=true` |
 | `/api/deployments/<id>/archive` | Archive upload target returned by `get_upload_url` |
+| `/app-api/*` | JSON endpoints for the UI only (session cookie + CSRF) |
 
 ### Site sign-in handoff
 
@@ -180,3 +249,30 @@ atomic: viewers see either the old version or the new one.
 
 One adapter interface with S3, GCS, and local filesystem implementations.
 Versions are stored as immutable file sets keyed by site id and version id.
+
+## Deployment
+
+### Image
+
+One image containing the static Go binary with the embedded frontend, on a
+distroless base, running as non-root.
+
+### Helm chart
+
+| Values | Behavior |
+|---|---|
+| `postgresql.enabled` (default `true`) | Bundled single-instance PostgreSQL StatefulSet (official `postgres` image) with a PVC. Intended for small installs. |
+| `externalDatabase.*` | Used when `postgresql.enabled=false`: `host`, `port`, `database`, `user`, and `existingSecret`/`existingSecretPasswordKey`, or a full DSN via `existingSecret`. |
+| `ingress.enabled` (default `false`) | Creates an Ingress with two rules: the app host and `*.<sitesDomain>`. `ingress.className`, `annotations`, and `tls` are configurable. |
+| `storage.type` | `local`, `s3`, or `gcs`, with per-adapter settings; credentials from an existing Secret or workload identity. |
+| `persistence.*` | PVC for the `local` adapter. |
+| `smtp.*` | Optional; notifications are disabled when unset. |
+| `google.*` | OAuth client ID and secret (from an existing Secret). |
+| `oauth.dcrEnabled` (default `false`) | Maps to `OAUTH_DCR_ENABLED`. |
+
+- Without the chart's Ingress, the operator routes both hostnames to the
+  Service (their own Ingress, Gateway API, or a tunnel).
+- The sites wildcard needs a wildcard TLS certificate; with cert-manager this
+  requires a DNS-01 issuer.
+- The `local` adapter with more than one replica requires a `ReadWriteMany`
+  volume; otherwise use S3 or GCS.

@@ -75,5 +75,13 @@ some access control, without the publisher keeping anything running.
   dedicated sites domain (`<site-id>.sites.example.com`).
 - **Storage**: pluggable adapter with S3, GCS, and local filesystem
   implementations.
+- **Backend**: Go. No Node.js runtime on the server.
+- **Frontend**: Next.js + TypeScript, statically exported and served by the Go
+  binary. Small surface: sign-up/sign-in, site management, sharing, settings.
+  It must look polished — stylish, not a default admin template.
+- **Site serving**: no rendering; the Go server streams the stored static files.
+- **Database**: PostgreSQL.
+- **Helm**: bundled PostgreSQL is optional, with external database support;
+  ingress is optional.
 
 Design details: [docs/design.md](docs/design.md).
