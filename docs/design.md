@@ -43,9 +43,18 @@ The server routes by `Host`: `APP_ORIGIN` host serves the UI, auth, OAuth, and
   middleware — all data comes from the Go JSON endpoints under `/app-api/`
   (session-cookie authenticated, CSRF-protected; internal to the UI, not a
   public API).
-- Dynamic routes (`/sites/<id>`, `/invite/<token>`) are exported as one shell
-  each; Go serves the shell for any matching path and the client reads the
-  parameter from the URL.
+- Every UI route is a fixed path; there are no dynamic segments, because static
+  export cannot serve `[id]` routes for IDs created at runtime (neither on direct
+  load nor on client-side `<Link>` navigation, which fetches per-route RSC
+  payloads). Parameters travel in the query string or fragment:
+  `/site?id=<site-id>` and `/invite#token=<token>`. The client reads them with
+  `useSearchParams` (inside `Suspense`) or `location.hash`.
+- Go serves the export as files: `/<route>` → `<route>.html`, RSC payloads and
+  assets as-is, unknown paths → the export's `404.html` with status 404. There
+  is no catch-all HTML fallback.
+- Acceptance check for the scaffold: with a site and an invite created at
+  runtime, both a direct page load and client-side `<Link>` navigation to
+  `/site?id=…` and `/invite#token=…` render correctly.
 - Tailwind CSS + shadcn/ui; `@simplewebauthn/browser` for passkey ceremonies.
 - Screens: sign-up, sign-in, recovery-code display and use, site list, site
   detail (overview, members and invites, public link, versions, transfer,
@@ -93,8 +102,8 @@ with the app or with each other (URL option B).
 | Route | Purpose |
 |---|---|
 | `/` | Sites the user owns, manages, or can view |
-| `/sites/<site-id>` | Settings, members, invites, public link, versions |
-| `/invite/<token>` | Accept an invite (signs up or signs in first) |
+| `/site?id=<site-id>` | Settings, members, invites, public link, versions |
+| `/invite#token=<token>` | Accept an invite or ownership transfer (signs up or signs in first). The token is in the fragment so it never reaches server or proxy logs. |
 | `/signup`, `/login` | Passkey or Google |
 | `/auth/google/callback` | Google OIDC callback |
 | `/auth/site` | Issues site tickets (handoff below) |
@@ -166,8 +175,11 @@ do not stop an artifact from sending credentialed requests to the app. Required:
 ## Sharing
 
 - `share_site` (or the UI) creates an invite for an email and role and always
-  returns an invite link: `https://dash.example.com/invite/<token>`. With SMTP
+  returns an invite link: `https://dash.example.com/invite#token=<token>`. With SMTP
   configured and `notify` set, the link is also emailed.
+- The invite page keeps the token in `sessionStorage` across the sign-in or
+  sign-up redirect (Google round trip), then accepts it with a CSRF-protected
+  POST and clears it.
 - The grant binds to whichever account accepts the invite link. It is applied
   automatically, without the link, only to an existing account whose matching
   email is verified.
