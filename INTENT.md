@@ -33,8 +33,8 @@ some access control, without the publisher keeping anything running.
   sites (HTML/CSS/JS/assets). No server-side execution of artifact content.
 - **Harness-agnostic publishing**: must not depend on Claude Desktop; any agent
   that can make a request or run a CLI should be able to publish.
-- **Security**: artifacts are not public by default. Viewers must be authorized.
-  The access model is undecided (see open questions).
+- **Security**: artifacts are not public by default. Viewers must be authorized
+  (see decisions).
 - **Self-hostable**: shipped as Docker image(s) and a Helm chart.
 
 ## Non-goals
@@ -42,12 +42,20 @@ some access control, without the publisher keeping anything running.
 - Dynamic/server-side apps or hosting arbitrary backends.
 - Depending on any third-party hosting of artifact content.
 
+## Decisions
+
+- **Access control**: token/URL-based to start. Viewers are link holders —
+  possessing the artifact's tokenized URL grants view access. No viewer
+  accounts or RBAC yet.
+- **Lifecycle**: sites are updatable in place; an update keeps the same URL so
+  viewers (e.g. a daily dashboard) see the new content. No expiration for now.
+- **Publishing interface**: the server exposes an MCP endpoint at `/mcp`.
+- **Storage**: pluggable adapter with S3, GCS, and local filesystem
+  implementations.
+
 ## Open questions
 
-- Access model: per-artifact share links/tokens, viewer accounts, full RBAC, or
-  a mix (e.g. publisher-only admin + shareable viewer links)?
-- Viewer identity: are viewers (e.g. spouse) logged-in users, or link holders?
-- Artifact lifecycle: ephemeral with expiry, versioned/updatable (dashboard),
-  or both?
-- Publishing interface: HTTP API, CLI, MCP server, or several?
-- Storage backend: local volume, S3-compatible object storage, or pluggable?
+- How publishers authenticate to `/mcp` (API key, bearer token, OAuth)?
+- Do updates retain previous versions, or overwrite?
+- Are other publish interfaces (HTTP API, CLI) needed besides MCP?
+- Token revocation/rotation for a shared URL.
