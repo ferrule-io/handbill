@@ -93,7 +93,7 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
 
   image:
-    name: Image build and routing acceptance
+    name: Image build and acceptance
     runs-on: ubuntu-latest
     services:
       # The server applies migrations at startup and exits without a database.
@@ -119,8 +119,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Start container
+        # /data is a host directory, and the container runs as the runner's
+        # user, so the e2e seeder (internal/sites/e2eseed) writes site blobs
+        # where the container's local storage reads and writes them.
         run: |
+          mkdir -p "$RUNNER_TEMP/data"
           docker run -d --name agent-dash --network host \
+            --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/data:/data" \
             -e APP_ORIGIN=http://dash.localhost:8080 \
             -e SITES_DOMAIN=sites.localhost \
             -e SECRET_KEY="$(openssl rand -base64 48)" \
@@ -140,11 +145,18 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - name: Routing acceptance check (Playwright)
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Acceptance checks (Playwright)
         working-directory: web
         env:
           BASE_URL: http://dash.localhost:8080
           SITES_DOMAIN: sites.localhost
+          # The seeder uses the container's database and storage.
+          DATABASE_URL: postgres://agentdash:agentdash@127.0.0.1:5432/agentdash?sslmode=disable
+          STORAGE_TYPE: local
+          STORAGE_LOCAL_DIR: ${{ runner.temp }}/data
         run: |
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium

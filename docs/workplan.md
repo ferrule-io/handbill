@@ -71,8 +71,9 @@ func init() { modules = append(modules, <feature>.Register) }
 - Cross-cutting request wrapping uses `r.UseApp(mw)` / `r.UseSites(mw)`
   (first registered runs outermost). Only W3 (session) and W9 (rate limits,
   metrics) are expected to use them.
-- `/healthz` and `/readyz` are answered by `internal/server` on any host
-  before host routing; `readyz` pings `Deps.DB` and `Deps.Storage`.
+- `/healthz` and `/readyz` are answered by `internal/server` on every host
+  except site hosts (where they are site content); `readyz` pings `Deps.DB`
+  and `Deps.Storage`.
 
 ### Shared dependencies
 
@@ -403,7 +404,7 @@ func New(cfg *config.SMTP) Sender // nil cfg → Enabled() false, Send returns E
 Notes: `__Host-` cookies require `Secure`; browsers accept Secure cookies on
 `http://*.localhost`, so dev works over HTTP.
 
-## W4 Sites, versions, publish pipeline, file server
+## W4 Sites, versions, publish pipeline, file server — done
 
 Owns: `internal/sites/` (service), `internal/rbac/`, `internal/siteserver/`
 (sites-mux file server and `/_auth/callback`), route `GET /auth/site`,
@@ -490,9 +491,39 @@ package siteserver
 func Authorized(c token.SiteCookie, a sites.Access) bool
 ```
 
-`siteserver` registers `GET /` and reserves `/_auth/` on the sites mux
+`siteserver` registers `GET /` and reserves `GET /_auth/` on the sites mux
 (404 for anything it does not handle); W6 adds the more specific
 `GET /_auth/share/{token}`.
+
+Additions beyond the signatures above (all additive):
+
+- `sites`: `const Replace, Merge Mode`; errors `ErrNotFound`,
+  `ErrDeploymentClosed`, and `*InputError` (caller input rejected: bad path,
+  title, mode, archive entry, empty deployment; `Msg` is safe to show — map
+  it to the MCP tool error); `Version.PublisherEmail` (primary email, "" when
+  unknown); `GetVersion(ctx, siteID, id)`; `FindFile(ctx, versionID,
+  candidates...)` and `OpenBlob(ctx, siteID, sha256Hex)` (the file server
+  resolves against the version `Access` returned); `CleanPath` and
+  `ContentTypeFor`; limits in `limits.go` (`MaxFileSize`,
+  `MaxArchiveEntries`, `MaxArchiveSize`, `MaxPathLen`; W9 makes them
+  configurable). `OpenFile` returns `*InputError` for an invalid path.
+  `sites.Register` installs `/app-api/sites`: `GET` (list), `GET|PATCH|DELETE
+  /{id}`, `GET /{id}/versions`, `POST /{id}/rollback` `{versionId}`; non-
+  members get the same 404 as for a missing site. W6's member endpoints
+  live beside these in `internal/sharing`.
+- `rbac`: `Role.Valid()`.
+- `siteserver`: `Register`, `CookieName`, `CookieTTL` (12 h), `TicketTTL`
+  (60 s), `ValidReturnPath`. `GET /auth/site` redirects signed-in users
+  without a role to `/site?id=<id>` (the UI's no-access state).
+- Tests: `internal/sites/sitestest` (dbtest database + local store + seeded
+  users). E2E: `internal/sites/e2eseed` is a test-only command that inserts
+  users, sessions, and published sites into the server's database and
+  storage (it reads the server's env); `web/e2e/support/seed.ts` runs it and
+  injects `__Host-session`. CI's image job mounts `/data` from the runner
+  and runs the container as the runner's user so the seeder can write blobs.
+- Web: `components/site/data.ts` holds the `/app-api/sites` types, `useApi`,
+  and formatting helpers; W6 adds its site-page sections to
+  `components/site/site-detail.tsx`.
 
 ## W5 OAuth 2.1 authorization server and `/mcp`
 

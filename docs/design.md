@@ -63,11 +63,21 @@ The server routes by `Host`: `APP_ORIGIN` host serves the UI, auth, OAuth, and
 
 ### Site file server
 
-No rendering. For a request on `<id>.SITES_DOMAIN`: authorize (site cookie or
-handoff), resolve the path against the site's current version (`/` and
-directory paths → `index.html`; missing → the site's `404.html` if present,
-else a plain 404), and stream the object from storage with a content type from
-the extension and an ETag derived from the version.
+No rendering. For a `GET`/`HEAD` on `<id>.SITES_DOMAIN`: authorize (site
+cookie, else redirect to the handoff), resolve the path against the site's
+current version, and stream the blob from storage. Every path except the
+reserved `/_auth/` is site content, including `/healthz` and `/readyz`.
+
+- Resolution: `/` and paths ending in `/` → `<dir>/index.html`; `/foo` →
+  `foo`, else `foo/index.html`, else `foo.html`. Paths are case-sensitive.
+  Anything else → the site's `404.html` with status 404 if it has one, else a
+  plain-text 404. A site with nothing published answers a plain 404.
+- Headers: `Content-Type` from the file's recorded type, `Content-Length`,
+  `ETag` = the blob's SHA-256 (`If-None-Match` → 304), `Cache-Control:
+  private, no-cache` (so every load re-checks access), `X-Content-Type-Options:
+  nosniff`.
+- One request resolves against the version that the access check returned,
+  so a concurrent publish or rollback never mixes versions in one response.
 
 ### Repository layout
 
@@ -126,12 +136,23 @@ receive it.
 
 1. A request to `https://<id>.sites.example.com/<path>` without a valid site
    cookie redirects to `https://dash.example.com/auth/site?site=<id>&return=<path>`.
-2. The app requires a session (sign-in/sign-up if needed) and the viewer role,
-   then redirects to `https://<id>.sites.example.com/_auth/callback?ticket=<t>`.
-   The ticket is a random token bound to the site id and user, valid ~60 s,
-   single use (stored hashed and consumed atomically on redemption).
+2. The app requires a session (redirecting to `/login?return=<this URL>` if
+   needed) and the viewer role, then redirects to
+   `https://<id>.sites.example.com/_auth/callback?ticket=<t>`. The ticket is a
+   random token bound to the site id, user, and return path, valid 60 s,
+   single use (stored hashed and consumed atomically on redemption; a ticket
+   presented on another site's host is consumed and refused). A signed-in user
+   without a role is redirected to `/site?id=<id>`, which says the site does
+   not exist or was not shared with them: the answer is the same whether or
+   not the site exists, and no ticket is issued.
 3. The site host redeems the ticket, sets `__Host-site` (Secure, HttpOnly,
-   SameSite=Lax, Path=/, host-only), and redirects to `<path>`.
+   SameSite=Lax, Path=/, host-only, 12 h), and redirects to `<path>` with
+   `Referrer-Policy: no-referrer`. The cookie is short because the handoff is
+   invisible while the app session lives; the per-request check below is what
+   enforces revocation.
+
+Return paths must start with a single `/` (not `//`) and contain no
+backslashes or control characters; anything else is rejected with 400.
 
 Each site request loads the site's access state (current version, membership,
 public-link enabled flag and generation) and re-checks the cookie against it,
@@ -274,6 +295,41 @@ version. All previous versions are kept (no retention limit) and any can be
 restored with `rollback_site`, which repoints the site (no copy). Publishing is
 atomic: viewers see either the old version or the new one.
 
+## Publishing
+
+Publishing goes through staged deployments (`create_deployment`,
+`upload_files`, `get_upload_url`, `finalize_deployment`); `publish_site` is
+the one-shot form of the same pipeline.
+
+- Paths are relative and slash-separated. A leading `./` is dropped;
+  absolute paths, `.` and `..` segments, empty segments (including a
+  trailing `/`), backslashes, NUL and other control characters, invalid
+  UTF-8, paths over 1024 bytes, and the reserved top-level `_auth/` are
+  rejected. Paths are case-sensitive.
+- Content type comes from the extension (a fixed table of web types, then
+  Go's `mime` package, else `application/octet-stream`); textual types get
+  `charset=utf-8`. An explicit content type on a file overrides it.
+- Blobs are stored once per site under their SHA-256; a blob the site
+  already has is not uploaded again.
+- `replace` publishes exactly the deployment's files and must contain at
+  least one. `merge` starts from the version that is current when the
+  deployment is finalized (the site row is locked, so concurrent merges
+  apply in turn and never drop each other's files), applies added and
+  overwritten files, and removes deleted paths; deleted paths the version
+  lacks are ignored. `delete_paths` is rejected in replace mode. A result
+  with no files is rejected. Within a deployment the last operation on a
+  path wins.
+- Finalizing creates the immutable version and its file list and repoints
+  the site in one transaction; a deployment finalizes once.
+- Archives (`.tar.gz`, `.zip`) are streamed entry by entry. Symlinks, hard
+  links, devices, FIFOs, and invalid paths reject the whole archive;
+  directory entries are skipped. When every file shares one top-level
+  directory (`site/index.html`, `site/css/app.css`, as `tar czf site.tar.gz
+  site/` produces), that directory is stripped; otherwise paths are kept as
+  they are. Limits (`internal/sites/limits.go`): 10 000 entries, 64 MiB per
+  file, 512 MiB uncompressed per archive (also the cap on compressed bytes
+  read).
+
 ## MCP authorization
 
 - OAuth 2.1 per the MCP authorization spec (2025-11-25), with PKCE (S256) and
@@ -387,9 +443,9 @@ Runtime contract:
   database is unreachable; the orchestrator's restart policy retries it. The
   schema targets PostgreSQL 17 and later.
 - `GET /healthz` (liveness: the process serves HTTP) and `GET /readyz`
-  (readiness: the database and, once wired, storage answer within 3 s) respond
-  on any `Host`, because Kubernetes probes use the pod IP. On site hosts they
-  shadow site files at those two paths.
+  (readiness: the database and storage answer within 3 s) respond on every
+  host except site hosts, because Kubernetes probes use the pod IP. On
+  `<id>.SITES_DOMAIN` those paths are site content.
 - Requests are routed by `Host` (port ignored): `APP_ORIGIN`'s host serves the
   app; `<id>.SITES_DOMAIN`, with `<id>` a valid site id, serves that site; any
   other host gets 404.
