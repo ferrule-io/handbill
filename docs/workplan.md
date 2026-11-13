@@ -172,7 +172,7 @@ Owns: `deploy/helm/agent-dash/` and its install docs. Consumes the
 configuration and runtime contract in design.md#configuration (env vars,
 port 8080, UID/GID 65532, `/data`, probes on any `Host`).
 
-## W2a Schema, migrations, queries, token helpers
+## W2a Schema, migrations, queries, token helpers — done
 
 Owns: `internal/db/` (`migrations/`, `queries/`, `sqlc.yaml`, generated
 code, `db.go`), `internal/db/dbtest/`, `internal/token/`. Adds a PostgreSQL
@@ -227,7 +227,7 @@ type SiteCookie struct {
 	Expires    time.Time
 }
 func (s *Signer) SiteCookie(c SiteCookie) string
-func (s *Signer) ParseSiteCookie(v string, now time.Time) (SiteCookie, error)
+func (s *Signer) ParseSiteCookie(v string, now time.Time) (SiteCookie, error) // ErrInvalid | ErrExpired
 
 type UploadGrant struct {
 	DeploymentID uuid.UUID
@@ -235,7 +235,7 @@ type UploadGrant struct {
 	Expires      time.Time
 }
 func (s *Signer) UploadGrant(g UploadGrant) string
-func (s *Signer) ParseUploadGrant(v string, now time.Time) (UploadGrant, error)
+func (s *Signer) ParseUploadGrant(v string, now time.Time) (UploadGrant, error) // ErrInvalid | ErrExpired
 ```
 
 Schema notes: every token column is `bytea` holding the SHA-256 and is
@@ -246,8 +246,48 @@ content-addressed blobs (below), so the schema has
 `version_files(version_id, path, blob_sha256, size, content_type)` and
 `deployment_files` with the same shape plus deletions for merge mode.
 
+Signatures are as above. Additions: `token.ErrInvalid` (bad format,
+signature, or purpose) and `token.ErrExpired`; signed expiry is carried to
+the second. `db.Open` now connects at startup and fails when the database is
+unreachable (design.md runtime contract). Regenerate queries with
+`go generate ./internal/db` (sqlc pinned in `mise.toml`; CI checks the
+committed output). `TEST_DATABASE_URL` is in `mise.toml` for the Compose
+database.
+
+Schema contract for later workstreams (details in the comments of
+`internal/db/migrations/20261113000000_schema.sql`):
+
+- Emails are stored lowercased (`CHECK email = lower(email)`); normalize
+  before writing or comparing. `emails` allows any number of unverified
+  claims to an address and at most one verified holder; verifying runs
+  `DisplaceUnverifiedEmailClaims` then `MarkEmailVerified` in one
+  transaction. `is_primary` (at most one per user) is `identity.User.Email`.
+- Exactly one owner per site: create the site and its `owner` membership in
+  one transaction (`sites_owner_membership` is checked at commit). A
+  transfer demotes the old owner, promotes the new one, and sets
+  `sites.owner_id` in one transaction.
+- `versions` and `version_files` are immutable (update trigger); derive a
+  version's file count and size from `version_files`.
+  `sites.current_version_id` must name a version of the same site.
+- Deleting a site cascades to everything site-scoped; storage under
+  `sites/<id>/` is the caller's to delete. Deleting a user cascades to their
+  credentials, sessions, tokens, grants, and memberships and nulls
+  publisher/inviter references, but is refused while they own a site
+  (`sites.owner_id` `ON DELETE RESTRICT`): delete or transfer those first.
+- `site_blobs` records uploaded blobs per site for blob GC (W9), since
+  `storage.Store` cannot list.
+- Invites and transfers have `revoked_at`; their consumption also requires
+  `revoked_at IS NULL`. Public-link generations start at 1, so member
+  cookies (`LinkGen` 0) never match.
+- OAuth: revoking a grant (`oauth_grants`, unique per user+client) deletes
+  its codes and tokens. Access and refresh tokens carry `family_id` = the
+  authorization code's id; a rotated refresh token (`rotated_at`, one child
+  via unique `parent_id`) or a consumed code presented again revokes the
+  family.
+
 Done when: migrations apply on a fresh database; `dbtest` and `token` have
-unit tests.
+unit tests. Verified on PostgreSQL 17 and 18, including rollback to zero
+and re-apply.
 
 ## W2b Storage adapters — done
 

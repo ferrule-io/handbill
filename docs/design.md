@@ -343,6 +343,10 @@ Runtime contract:
 - The container listens on port 8080 and runs as UID/GID 65532 (distroless
   `nonroot`); the `local` adapter writes under `/data`, which the image
   creates owned by that user.
+- At startup the server applies pending migrations (serialized across
+  replicas by an advisory lock) before listening, and exits non-zero if the
+  database is unreachable; the orchestrator's restart policy retries it. The
+  schema targets PostgreSQL 17 and later.
 - `GET /healthz` (liveness: the process serves HTTP) and `GET /readyz`
   (readiness: the database and, once wired, storage answer within 3 s) respond
   on any `Host`, because Kubernetes probes use the pod IP. On site hosts they

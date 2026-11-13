@@ -1,0 +1,29 @@
+# sqlc generates the Go query code in this package from queries/*.sql
+# against the goose migrations. Regenerate with `go generate ./internal/db`
+# (sqlc is pinned in mise.toml); the output is committed.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: queries
+    gen:
+      go:
+        package: db
+        out: .
+        sql_package: pgx/v5
+        output_db_file_name: dbtx.go
+        output_models_file_name: models.go
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
