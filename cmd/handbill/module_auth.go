@@ -1,5 +1,5 @@
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/auth"
+import "github.com/ferrule-io/handbill/internal/auth"
 
 func init() { modules = append(modules, auth.Register) }

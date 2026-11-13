@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/api/option"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/gcsstore"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/storagetest"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/storage"
+	"github.com/ferrule-io/handbill/internal/storage/gcsstore"
+	"github.com/ferrule-io/handbill/internal/storage/storagetest"
 )
 
 func TestGCS(t *testing.T) {
@@ -27,7 +27,7 @@ func TestGCS(t *testing.T) {
 	_ = os.Setenv("STORAGE_EMULATOR_HOST", emulatorHost)
 
 	ctx := context.Background()
-	bucket := "agent-dash-test-bucket"
+	bucket := "handbill-test-bucket"
 
 	// Create bucket in fake-gcs-server if not exists
 	client, err := gcs.NewClient(ctx, option.WithoutAuthentication())

@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	mailer "github.com/mjquinlan2000/agent-dash/internal/mail"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/db"
+	mailer "github.com/ferrule-io/handbill/internal/mail"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // verificationTTL is how long an email verification link works.
@@ -31,10 +31,10 @@ func (m *module) sendVerificationEmail(ctx context.Context, emailID uuid.UUID, a
 	link := m.d.Config.AppOrigin.String() + "/verify-email#token=" + plain
 	return m.mail.Send(ctx, mailer.Message{
 		To:      address,
-		Subject: "Confirm your email for agent-dash",
-		Text: fmt.Sprintf("Confirm that %s is your address on agent-dash:\n\n%s\n\n"+
+		Subject: "Confirm your email for handbill",
+		Text: fmt.Sprintf("Confirm that %s is your address on handbill:\n\n%s\n\n"+
 			"The link works once, for 24 hours. If you didn't create an account, ignore this email.\n", address, link),
-		HTML: fmt.Sprintf(`<p>Confirm that <strong>%s</strong> is your address on agent-dash.</p>`+
+		HTML: fmt.Sprintf(`<p>Confirm that <strong>%s</strong> is your address on handbill.</p>`+
 			`<p><a href="%s">Confirm email</a></p>`+
 			`<p style="color:#666">The link works once, for 24 hours. If you didn't create an account, ignore this email.</p>`,
 			html.EscapeString(address), html.EscapeString(link)),

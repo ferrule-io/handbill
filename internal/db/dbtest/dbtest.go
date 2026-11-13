@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
+	"github.com/ferrule-io/handbill/internal/db"
 )
 
 // Pool returns a pool on a fresh database created through TEST_DATABASE_URL
@@ -27,7 +27,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 		if os.Getenv("CI") != "" {
 			t.Fatal("dbtest: TEST_DATABASE_URL must be set in CI")
 		}
-		t.Skip("dbtest: TEST_DATABASE_URL is unset (e.g. postgres://agentdash:agentdash@localhost:55432/agentdash?sslmode=disable after `make db-up`)")
+		t.Skip("dbtest: TEST_DATABASE_URL is unset (e.g. postgres://handbill:handbill@localhost:55432/handbill?sslmode=disable after `make db-up`)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -40,7 +40,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 
 	var b [8]byte
 	_, _ = rand.Read(b[:])
-	name := "agentdash_test_" + hex.EncodeToString(b[:])
+	name := "handbill_test_" + hex.EncodeToString(b[:])
 	ident := pgx.Identifier{name}.Sanitize()
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+ident); err != nil {
 		t.Fatalf("dbtest: create database: %v", err)

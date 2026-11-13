@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 // dist holds the export. `all:` keeps _next/ and other underscore paths.
@@ -182,9 +182,9 @@ func (h *Handler) write(w http.ResponseWriter, r *http.Request, status int, name
 }
 
 const placeholder = `<!doctype html><html lang="en"><meta charset="utf-8">
-<title>agent-dash</title>
+<title>handbill</title>
 <body style="font:16px/1.5 system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem">
-<h1>agent-dash</h1>
+<h1>handbill</h1>
 <p>The web UI is not built into this binary. Run <code>make web</code> and rebuild,
 or use the container image.</p>
 </body></html>

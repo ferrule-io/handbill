@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 const appOrigin = "http://dash.localhost:8083"

@@ -5,10 +5,10 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mjquinlan2000/agent-dash/internal/oauth"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/oauth"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // Register serves /mcp on the app host. The handler is stateless (MCP

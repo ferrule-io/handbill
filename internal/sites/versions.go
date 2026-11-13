@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/siteid"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/siteid"
+	"github.com/ferrule-io/handbill/internal/storage"
 )
 
 // ListVersions returns every version of a site, newest first.

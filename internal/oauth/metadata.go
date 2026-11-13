@@ -6,7 +6,7 @@ import (
 )
 
 // protectedResourceMetadata is RFC 9728 metadata for /mcp. No
-// scopes_supported: agent-dash has no scopes.
+// scopes_supported: handbill has no scopes.
 type protectedResourceMetadata struct {
 	Resource               string   `json:"resource"`
 	AuthorizationServers   []string `json:"authorization_servers"`
@@ -15,7 +15,7 @@ type protectedResourceMetadata struct {
 }
 
 // authServerMetadata is RFC 8414 metadata. The SDK's oauthex.AuthServerMeta
-// always emits jwks_uri, so agent-dash uses its own struct.
+// always emits jwks_uri, so handbill uses its own struct.
 type authServerMetadata struct {
 	Issuer                                     string   `json:"issuer"`
 	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
@@ -37,7 +37,7 @@ func (m *module) protectedResource(w http.ResponseWriter, r *http.Request) {
 		Resource:               Resource(m.d.Config),
 		AuthorizationServers:   []string{Issuer(m.d.Config)},
 		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "agent-dash",
+		ResourceName:           "handbill",
 	})
 }
 

@@ -22,10 +22,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	mailer "github.com/mjquinlan2000/agent-dash/internal/mail"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/db"
+	mailer "github.com/ferrule-io/handbill/internal/mail"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 // googleIssuer is Google's OIDC issuer; tests substitute a fake one.
@@ -63,7 +63,7 @@ func register(r *server.Routes, d *server.Deps, o options) error {
 func newModule(d *server.Deps, o options) (*module, error) {
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          d.Config.AppHost,
-		RPDisplayName: "agent-dash",
+		RPDisplayName: "handbill",
 		RPOrigins:     []string{d.Config.AppOrigin.String()},
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			// Discoverable credentials let sign-in skip the email field.

@@ -3,7 +3,7 @@ package mcp
 import (
 	"net/http"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
+	"github.com/ferrule-io/handbill/internal/config"
 )
 
 // checkOrigin enforces the Streamable HTTP DNS-rebinding rule: requests

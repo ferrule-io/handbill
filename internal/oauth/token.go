@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // tokenResponse is a successful token response (OAuth 2.1 §3.2.3).
@@ -45,7 +45,7 @@ func readForm(w http.ResponseWriter, r *http.Request) (url.Values, *oauthError) 
 }
 
 // authenticateClient finds the public client a token or revocation request
-// names. Any client authentication is refused (CIMD-03 §5): agent-dash
+// names. Any client authentication is refused (CIMD-03 §5): handbill
 // issues no secrets. This runs before any code or token is touched, so a
 // client that tries HTTP Basic first can retry with form parameters.
 func (m *module) authenticateClient(ctx context.Context, r *http.Request, form url.Values) (db.OauthClient, *oauthError) {
@@ -69,7 +69,7 @@ func (m *module) authenticateClient(ctx context.Context, r *http.Request, form u
 
 func writeTokenError(w http.ResponseWriter, r *http.Request, e *oauthError) {
 	if e.status == http.StatusUnauthorized && r.Header.Get("Authorization") != "" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="agent-dash"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="handbill"`)
 	}
 	writeError(w, e)
 }

@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mjquinlan2000/agent-dash/internal/storage/storagetype"
+	"github.com/ferrule-io/handbill/internal/storage/storagetype"
 )
 
 // Store implements storagetype.Store on the local filesystem.

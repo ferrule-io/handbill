@@ -9,11 +9,11 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/storage"
+	"github.com/ferrule-io/handbill/internal/storage/s3store"
+	"github.com/ferrule-io/handbill/internal/storage/storagetest"
 	"github.com/google/uuid"
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/s3store"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/storagetest"
 )
 
 func TestS3(t *testing.T) {
@@ -26,7 +26,7 @@ func TestS3(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	bucket := "agent-dash-test"
+	bucket := "handbill-test"
 
 	if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
 		_ = os.Setenv("AWS_ACCESS_KEY_ID", "minioadmin")

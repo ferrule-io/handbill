@@ -1,5 +1,5 @@
 // Command e2eseed seeds accounts, signed-in sessions, and published sites
-// straight into the database and storage of a running agent-dash, for the
+// straight into the database and storage of a running handbill, for the
 // Playwright specs (web/e2e). It is a test tool, never part of the server:
 // no endpoint exposes it.
 //
@@ -38,12 +38,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/storage"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 type spec struct {

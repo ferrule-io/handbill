@@ -10,15 +10,15 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/sharing"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
-	"github.com/mjquinlan2000/agent-dash/internal/sites/sitestest"
-	"github.com/mjquinlan2000/agent-dash/internal/siteserver"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sharing"
+	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/sites/sitestest"
+	"github.com/ferrule-io/handbill/internal/siteserver"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // httpEnv serves the app API (sites + sharing) and the site host over the

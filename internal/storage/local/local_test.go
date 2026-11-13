@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ferrule-io/handbill/internal/storage"
+	"github.com/ferrule-io/handbill/internal/storage/local"
+	"github.com/ferrule-io/handbill/internal/storage/storagetest"
 	"github.com/google/uuid"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/local"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/storagetest"
 )
 
 func TestLocal(t *testing.T) {

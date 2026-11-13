@@ -3,9 +3,9 @@ package oauth
 import (
 	"time"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/safehttp"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/safehttp"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 // Options adjust the module; the zero value is production. Exported for
@@ -35,7 +35,7 @@ func Module(o Options) server.Module {
 			m.cimd = safehttp.New(safehttp.Options{
 				Timeout:      5 * time.Second,
 				MaxBodyBytes: maxCIMDBytes,
-				UserAgent:    "agent-dash (+" + Issuer(d.Config) + ")",
+				UserAgent:    "handbill (+" + Issuer(d.Config) + ")",
 			})
 		}
 		if m.now == nil {

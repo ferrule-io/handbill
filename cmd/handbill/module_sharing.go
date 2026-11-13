@@ -1,5 +1,5 @@
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/sharing"
+import "github.com/ferrule-io/handbill/internal/sharing"
 
 func init() { modules = append(modules, sharing.Register) }

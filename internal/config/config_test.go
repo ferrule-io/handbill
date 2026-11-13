@@ -15,7 +15,7 @@ func base() map[string]string {
 		"APP_ORIGIN":   "https://Dash.Example.com",
 		"SITES_DOMAIN": "sites.example.com",
 		"SECRET_KEY":   strings.Repeat("k", 32),
-		"DATABASE_URL": "postgres://u:p@db:5432/agentdash?sslmode=disable",
+		"DATABASE_URL": "postgres://u:p@db:5432/handbill?sslmode=disable",
 	}
 }
 
@@ -46,7 +46,7 @@ func TestDefaults(t *testing.T) {
 	if c.SMTP != nil || c.Google != nil {
 		t.Errorf("SMTP = %+v, Google = %+v", c.SMTP, c.Google)
 	}
-	if c.Database.ConnConfig.Host != "db" || c.Database.ConnConfig.Database != "agentdash" {
+	if c.Database.ConnConfig.Host != "db" || c.Database.ConnConfig.Database != "handbill" {
 		t.Errorf("Database = %+v", c.Database.ConnConfig)
 	}
 	if got := c.SiteOrigin("abcdefghijkl"); got != "https://abcdefghijkl.sites.example.com" {
@@ -77,11 +77,11 @@ func TestFullConfig(t *testing.T) {
 		"SITES_DOMAIN", "sites.localhost",
 		"STORAGE_TYPE", "s3",
 		"S3_BUCKET", "b", "S3_REGION", "us-east-1",
-		"S3_ENDPOINT", "http://minio:9000", "S3_PREFIX", "/agent-dash/",
+		"S3_ENDPOINT", "http://minio:9000", "S3_PREFIX", "/handbill/",
 		"S3_FORCE_PATH_STYLE", "true",
 		"SMTP_HOST", "smtp.example.com", "SMTP_TLS", "tls",
 		"SMTP_USERNAME", "u", "SMTP_PASSWORD", "p",
-		"SMTP_FROM", "agent-dash <dash@example.com>",
+		"SMTP_FROM", "handbill <dash@example.com>",
 		"GOOGLE_CLIENT_ID", "id", "GOOGLE_CLIENT_SECRET", "secret",
 		"OAUTH_DCR_ENABLED", "true",
 		"INVITE_TTL", "48h",
@@ -92,7 +92,7 @@ func TestFullConfig(t *testing.T) {
 	if c.SiteOrigin("abcdefghijkl") != "http://abcdefghijkl.sites.localhost:8080" {
 		t.Errorf("SiteOrigin = %q", c.SiteOrigin("abcdefghijkl"))
 	}
-	if s := c.Storage.S3; s.Bucket != "b" || s.Prefix != "agent-dash" || !s.ForcePathStyle || s.Endpoint != "http://minio:9000" {
+	if s := c.Storage.S3; s.Bucket != "b" || s.Prefix != "handbill" || !s.ForcePathStyle || s.Endpoint != "http://minio:9000" {
 		t.Errorf("S3 = %+v", s)
 	}
 	if c.SMTP.Port != 465 || c.SMTP.From.Address != "dash@example.com" {

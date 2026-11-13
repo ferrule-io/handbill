@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/appapi"
 )
 
 type emailView struct {

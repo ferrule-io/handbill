@@ -12,8 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"google.golang.org/api/option"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/storage"
 )
 
 func TestValidKey(t *testing.T) {
@@ -124,14 +124,14 @@ func TestOpen(t *testing.T) {
 				o.UsePathStyle = true
 			})
 			_, _ = client.CreateBucket(ctx, &s3.CreateBucketInput{
-				Bucket: aws.String("agent-dash-test"),
+				Bucket: aws.String("handbill-test"),
 			})
 		}
 
 		s, err := storage.Open(ctx, config.Storage{
 			Type: config.StorageS3,
 			S3: config.S3{
-				Bucket:         "agent-dash-test",
+				Bucket:         "handbill-test",
 				Region:         "us-east-1",
 				Endpoint:       endpoint,
 				Prefix:         "open-test",
@@ -158,14 +158,14 @@ func TestOpen(t *testing.T) {
 
 		gcsClient, err := gcs.NewClient(ctx, option.WithoutAuthentication())
 		if err == nil {
-			_ = gcsClient.Bucket("agent-dash-test-bucket").Create(ctx, "test-project", nil)
+			_ = gcsClient.Bucket("handbill-test-bucket").Create(ctx, "test-project", nil)
 			_ = gcsClient.Close()
 		}
 
 		s, err := storage.Open(ctx, config.Storage{
 			Type: config.StorageGCS,
 			GCS: config.GCS{
-				Bucket: "agent-dash-test-bucket",
+				Bucket: "handbill-test-bucket",
 				Prefix: "open-test",
 			},
 		})

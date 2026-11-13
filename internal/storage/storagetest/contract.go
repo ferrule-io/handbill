@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
+	"github.com/ferrule-io/handbill/internal/storage"
 )
 
 type onlyReader struct {

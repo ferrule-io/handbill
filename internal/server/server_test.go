@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
+	"github.com/ferrule-io/handbill/internal/config"
 )
 
 func testHandler(t *testing.T) http.Handler {

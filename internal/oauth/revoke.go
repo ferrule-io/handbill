@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // revoke is POST /oauth/revoke (RFC 7009). Revoking a refresh token

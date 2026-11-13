@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // ServeHTTP is PUT /api/deployments/{id}/archive?grant=<signed>.

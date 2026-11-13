@@ -1,4 +1,4 @@
-module github.com/mjquinlan2000/agent-dash
+module github.com/ferrule-io/handbill
 
 go 1.27.4
 

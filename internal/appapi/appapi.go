@@ -18,8 +18,8 @@ import (
 	"mime"
 	"net/http"
 
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 // MaxBodyBytes caps request bodies read by ReadJSON.
@@ -145,7 +145,7 @@ func csrfCookie(r *http.Request) (string, bool) {
 
 func csrfMAC(d *server.Deps, cookie string) string {
 	m := hmac.New(sha256.New, d.Config.SecretKey)
-	m.Write([]byte("agent-dash/csrf\x00"))
+	m.Write([]byte("handbill/csrf\x00"))
 	m.Write([]byte(cookie))
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }

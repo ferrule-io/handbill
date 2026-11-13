@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/auth"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/auth"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // authorize is GET /oauth/authorize (plan §4.3). Errors that cannot be
@@ -175,7 +175,7 @@ func sameResource(requested, ours string) bool {
 }
 
 // keptScopes keeps offline_access, the only scope recorded, and drops the
-// rest: agent-dash has no scopes.
+// rest: handbill has no scopes.
 func keptScopes(scope string) []string {
 	if slices.Contains(strings.Fields(scope), offlineAccess) {
 		return []string{offlineAccess}

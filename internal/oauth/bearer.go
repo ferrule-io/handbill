@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // Principal is who an MCP request acts as: the user who approved the

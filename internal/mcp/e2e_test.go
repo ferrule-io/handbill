@@ -22,16 +22,16 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	agentauth "github.com/mjquinlan2000/agent-dash/internal/auth"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/mcp"
-	"github.com/mjquinlan2000/agent-dash/internal/oauth"
-	"github.com/mjquinlan2000/agent-dash/internal/safehttp"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/sites/sitestest"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
-	"github.com/mjquinlan2000/agent-dash/internal/upload"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	agentauth "github.com/ferrule-io/handbill/internal/auth"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/mcp"
+	"github.com/ferrule-io/handbill/internal/oauth"
+	"github.com/ferrule-io/handbill/internal/safehttp"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/sites/sitestest"
+	"github.com/ferrule-io/handbill/internal/token"
+	"github.com/ferrule-io/handbill/internal/upload"
 )
 
 // TestSDKClientEndToEnd drives the full OAuth flow with the Go SDK's own

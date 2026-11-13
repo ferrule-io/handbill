@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
-	"github.com/mjquinlan2000/agent-dash/internal/upload"
+	"github.com/ferrule-io/handbill/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/token"
+	"github.com/ferrule-io/handbill/internal/upload"
 )
 
 func init() { toolsets = append(toolsets, addPublishTools) }

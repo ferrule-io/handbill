@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
+	"github.com/ferrule-io/handbill/internal/db"
 )
 
 // Mode is how a deployment's files combine with the site's current version.

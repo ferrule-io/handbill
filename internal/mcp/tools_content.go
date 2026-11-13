@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
+	"github.com/ferrule-io/handbill/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/sites"
 )
 
 func init() { toolsets = append(toolsets, addContentTools) }

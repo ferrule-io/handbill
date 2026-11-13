@@ -26,12 +26,12 @@ import (
 	"github.com/go-webauthn/webauthn/protocol/webauthncose"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/db/dbtest"
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/mail"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/db/dbtest"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/mail"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 const (
@@ -39,7 +39,7 @@ const (
 	testRPID   = "dash.localhost"
 )
 
-// env is a server wired like cmd/agent-dash (appapi + auth) on a fresh
+// env is a server wired like cmd/handbill (appapi + auth) on a fresh
 // database, with a fake Google issuer and a recording mail sender.
 type env struct {
 	t      *testing.T

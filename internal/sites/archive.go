@@ -308,7 +308,7 @@ func spool(r io.Reader, limit int64) (*spooled, error) {
 		sumInto(sp, h)
 		return sp, nil
 	}
-	f, err := os.CreateTemp("", "agent-dash-spool-*")
+	f, err := os.CreateTemp("", "handbill-spool-*")
 	if err != nil {
 		return nil, err
 	}

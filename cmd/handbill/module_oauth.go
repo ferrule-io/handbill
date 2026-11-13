@@ -1,5 +1,5 @@
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/oauth"
+import "github.com/ferrule-io/handbill/internal/oauth"
 
 func init() { modules = append(modules, oauth.Register) }

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/gcsstore"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/local"
-	"github.com/mjquinlan2000/agent-dash/internal/storage/s3store"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/storage/gcsstore"
+	"github.com/ferrule-io/handbill/internal/storage/local"
+	"github.com/ferrule-io/handbill/internal/storage/s3store"
 )
 
 // Open creates a Store matching cfg.Type.

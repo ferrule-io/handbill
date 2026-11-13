@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/db"
 )
 
 // googleFlowCookie binds a Google round trip to the browser that started
@@ -119,7 +119,7 @@ func (m *module) googleStart(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// googleClaims are the ID token claims agent-dash uses.
+// googleClaims are the ID token claims handbill uses.
 type googleClaims struct {
 	Email         string `json:"email"`
 	EmailVerified bool   `json:"email_verified"`
@@ -256,7 +256,7 @@ func (m *module) googleSignIn(ctx context.Context, w http.ResponseWriter, r *htt
 			return err
 		}
 
-		// A new Google account creates a new agent-dash account; linking
+		// A new Google account creates a new handbill account; linking
 		// to an existing one only happens from settings. An address that
 		// another account has verified stays with it.
 		if c.Email != "" {

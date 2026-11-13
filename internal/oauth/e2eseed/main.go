@@ -1,5 +1,5 @@
 // Command e2eseed registers a CIMD client in the database of a running
-// agent-dash, for the Playwright consent spec (web/e2e/oauth.spec.ts). It
+// handbill, for the Playwright consent spec (web/e2e/oauth.spec.ts). It
 // is a test tool, never part of the server.
 //
 // The client's document is stored as freshly fetched with a one-day cache,
@@ -19,8 +19,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/db"
 )
 
 const (

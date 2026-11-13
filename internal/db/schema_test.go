@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/db/dbtest"
-	"github.com/mjquinlan2000/agent-dash/internal/siteid"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/db/dbtest"
+	"github.com/ferrule-io/handbill/internal/siteid"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // PostgreSQL error codes the schema relies on.

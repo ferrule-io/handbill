@@ -1,6 +1,6 @@
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/server"
+import "github.com/ferrule-io/handbill/internal/server"
 
 // modules are the feature packages' route registrations, passed to
 // server.New. Each feature appends itself from its own module_<name>.go file

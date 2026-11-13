@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 func testModule(t *testing.T) *module {

@@ -1,5 +1,5 @@
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/siteserver"
+import "github.com/ferrule-io/handbill/internal/siteserver"
 
 func init() { modules = append(modules, siteserver.Register) }

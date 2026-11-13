@@ -1,5 +1,5 @@
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/appapi"
+import "github.com/ferrule-io/handbill/internal/appapi"
 
 func init() { modules = append(modules, appapi.Register) }

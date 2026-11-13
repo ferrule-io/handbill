@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/mjquinlan2000/agent-dash/internal/oauth"
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
+	"github.com/ferrule-io/handbill/internal/oauth"
+	"github.com/ferrule-io/handbill/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/sites"
 )
 
 // principal returns the caller; RequireBearer guarantees one on /mcp.

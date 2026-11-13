@@ -18,8 +18,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/safehttp"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/safehttp"
 )
 
 // Client resolution failures shown on the consent error card (never
@@ -74,7 +74,7 @@ func (m *module) validCIMDURL(s string) bool {
 	return host != sites && !strings.HasSuffix(host, "."+sites)
 }
 
-// clientMetadata is the subset of a client's metadata agent-dash uses.
+// clientMetadata is the subset of a client's metadata handbill uses.
 type clientMetadata struct {
 	name         string
 	redirectURIs []string

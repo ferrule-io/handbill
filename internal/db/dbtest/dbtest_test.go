@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db/dbtest"
+	"github.com/ferrule-io/handbill/internal/db/dbtest"
 )
 
 func TestPool(t *testing.T) {

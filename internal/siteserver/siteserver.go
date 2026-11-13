@@ -26,13 +26,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/identity"
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/siteid"
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
-	"github.com/mjquinlan2000/agent-dash/internal/token"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/identity"
+	"github.com/ferrule-io/handbill/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/siteid"
+	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 const (
@@ -371,7 +371,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{{.Title}} · agent-dash</title>
+<title>{{.Title}} · handbill</title>
 <style>
 :root{--bg:#f7f5f0;--fg:#1d1b18;--muted:#6b665d;--card:#fffdf9;--ring:#e4dfd4;--accent:#c2410c}
 @media (prefers-color-scheme:dark){:root{--bg:#141311;--fg:#ece8e1;--muted:#9c968c;--card:#1c1a17;--ring:#2e2b26;--accent:#fb923c}}
@@ -382,7 +382,7 @@ p.eyebrow{margin:0 0 .5rem;font-size:.75rem;letter-spacing:.12em;text-transform:
 h1{margin:0 0 .5rem;font-size:1.35rem;line-height:1.25;font-weight:600}p{margin:0;color:var(--muted)}
 a{display:inline-block;margin-top:1.25rem;color:var(--fg);font-weight:600;text-underline-offset:3px}
 </style></head><body><main>
-<p class="eyebrow">agent-dash</p><h1>{{.Title}}</h1><p>{{.Message}}</p>
+<p class="eyebrow">handbill</p><h1>{{.Title}}</h1><p>{{.Message}}</p>
 {{if .Link}}<a href="{{.Link}}">Try again</a>{{end}}
 </main></body></html>`))
 

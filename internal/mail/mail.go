@@ -1,5 +1,5 @@
 // Package mail sends notification email through the optional SMTP server
-// (SMTP_* configuration). Everything in agent-dash works without it: when
+// (SMTP_* configuration). Everything in handbill works without it: when
 // SMTP_HOST is unset, Enabled reports false and Send returns ErrDisabled.
 package mail
 
@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
+	"github.com/ferrule-io/handbill/internal/config"
 )
 
 // ErrDisabled is returned by Send when SMTP is not configured.
@@ -179,7 +179,7 @@ func writeQP(w interface{ Write([]byte) (int, error) }, s string) error {
 }
 
 func messageID(from string) string {
-	domain := "agent-dash.invalid"
+	domain := "handbill.invalid"
 	if _, d, ok := strings.Cut(from, "@"); ok && d != "" {
 		domain = d
 	}

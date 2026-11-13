@@ -40,7 +40,7 @@ func NewSigner(secret []byte) *Signer {
 	s := &Signer{keys: make(map[string][]byte, 2)}
 	for _, p := range []string{purposeSiteCookie, purposeUploadGrant} {
 		m := hmac.New(sha256.New, secret)
-		m.Write([]byte("agent-dash/token/v1/" + p))
+		m.Write([]byte("handbill/token/v1/" + p))
 		s.keys[p] = m.Sum(nil)
 	}
 	return s

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mjquinlan2000/agent-dash/internal/mail"
-	"github.com/mjquinlan2000/agent-dash/internal/rbac"
+	"github.com/ferrule-io/handbill/internal/mail"
+	"github.com/ferrule-io/handbill/internal/rbac"
 )
 
 // send delivers m and reports whether the mail server accepted it. A
@@ -39,18 +39,18 @@ func inviteMessage(to, from, title string, role rbac.Role, link string, expires 
 	if role == rbac.Manager {
 		verb = "help manage"
 	}
-	lead := fmt.Sprintf("%s invited you to %s “%s” on agent-dash.", sender(from), verb, title)
+	lead := fmt.Sprintf("%s invited you to %s “%s” on handbill.", sender(from), verb, title)
 	action := "Open the invitation to create an account or sign in, and the site is yours to see:"
 	note := fmt.Sprintf("The link works once and expires on %s. If you weren’t expecting this, you can ignore it.", expiry(expires))
 	if granted {
-		action = "Your account already has access. Open the site from agent-dash:"
+		action = "Your account already has access. Open the site from handbill:"
 		note = "If you weren’t expecting this, you can ignore it."
 	}
 	return message(to, fmt.Sprintf("%s invited you to “%s”", sender(from), title), lead, action, "Open invitation", link, note)
 }
 
 func transferMessage(to, from, title, link string, expires time.Time) mail.Message {
-	lead := fmt.Sprintf("%s wants to make you the owner of “%s” on agent-dash.", sender(from), title)
+	lead := fmt.Sprintf("%s wants to make you the owner of “%s” on handbill.", sender(from), title)
 	action := "Open the link and accept while signed in to the account that should own it. They stay on as a manager."
 	note := fmt.Sprintf("The link works once and expires on %s. If you weren’t expecting this, you can ignore it.", expiry(expires))
 	return message(to, fmt.Sprintf("Ownership of “%s” is waiting for you", title), lead, action, "Review transfer", link, note)

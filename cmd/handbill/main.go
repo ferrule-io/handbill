@@ -1,4 +1,4 @@
-// Command agent-dash is the agent-dash server: app UI, auth, OAuth, /mcp,
+// Command handbill is the handbill server: app UI, auth, OAuth, /mcp,
 // and the site file server in one binary. Configuration comes from the
 // environment; see docs/design.md#configuration.
 package main
@@ -14,17 +14,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/storage"
 )
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
 		// Plain text so multi-line config errors stay readable in pod logs.
-		fmt.Fprintln(os.Stderr, "agent-dash:", err)
+		fmt.Fprintln(os.Stderr, "handbill:", err)
 		os.Exit(1)
 	}
 }

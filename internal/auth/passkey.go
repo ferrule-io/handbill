@@ -13,8 +13,8 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/db"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/db"
 )
 
 // waUser adapts an account to go-webauthn. The user handle is the user id's
@@ -61,7 +61,7 @@ func loadUser(ctx context.Context, q *db.Queries, userID uuid.UUID) (*waUser, er
 	if err != nil {
 		return nil, err
 	}
-	u := &waUser{id: userID, name: "agent-dash account"}
+	u := &waUser{id: userID, name: "handbill account"}
 	for _, p := range rows {
 		u.creds = append(u.creds, toCredential(p))
 	}

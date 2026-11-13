@@ -11,10 +11,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
-	"github.com/mjquinlan2000/agent-dash/internal/appapi"
-	"github.com/mjquinlan2000/agent-dash/internal/mcp"
-	"github.com/mjquinlan2000/agent-dash/internal/safehttp"
-	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/ferrule-io/handbill/internal/appapi"
+	"github.com/ferrule-io/handbill/internal/mcp"
+	"github.com/ferrule-io/handbill/internal/safehttp"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 func withMCP() harnessOpts { return harnessOpts{modules: []server.Module{mcp.Register}} }
@@ -469,7 +469,7 @@ func TestTokenExchange(t *testing.T) {
 	req.SetBasicAuth(f.clientID, "")
 	res, _ := h.srv.Client().Do(req)
 	res.Body.Close()
-	if res.StatusCode != 401 || res.Header.Get("WWW-Authenticate") != `Basic realm="agent-dash"` {
+	if res.StatusCode != 401 || res.Header.Get("WWW-Authenticate") != `Basic realm="handbill"` {
 		t.Fatalf("basic: %d %q", res.StatusCode, res.Header.Get("WWW-Authenticate"))
 	}
 	if status, _ := h.exchange(f, code); status != 200 {

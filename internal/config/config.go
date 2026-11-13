@@ -343,7 +343,7 @@ func (l *loader) smtp() *SMTP {
 	if from := l.required("SMTP_FROM"); from != "" {
 		addr, err := mail.ParseAddress(from)
 		if err != nil {
-			l.fail("SMTP_FROM", "must be an email address such as \"agent-dash <dash@example.com>\", got %q", from)
+			l.fail("SMTP_FROM", "must be an email address such as \"handbill <dash@example.com>\", got %q", from)
 		}
 		s.From = addr
 	}

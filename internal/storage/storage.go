@@ -4,7 +4,7 @@
 package storage
 
 import (
-	"github.com/mjquinlan2000/agent-dash/internal/storage/storagetype"
+	"github.com/ferrule-io/handbill/internal/storage/storagetype"
 )
 
 // ErrNotFound is returned (wrapped or bare) when a key does not exist.

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
+	"github.com/ferrule-io/handbill/internal/config"
 )
 
 func TestDisabled(t *testing.T) {
@@ -101,14 +101,14 @@ func TestSend(t *testing.T) {
 	p, _ := strconv.Atoi(port)
 	s := New(&config.SMTP{
 		Host: host, Port: p, TLS: config.SMTPNoTLS,
-		From: &mail.Address{Name: "agent-dash", Address: "dash@example.com"},
+		From: &mail.Address{Name: "handbill", Address: "dash@example.com"},
 	})
 	if !s.Enabled() {
 		t.Fatal("configured sender is disabled")
 	}
 	err := s.Send(context.Background(), Message{
 		To:      "Viewer <viewer@example.com>",
-		Subject: "Confirm your email — agent-dash",
+		Subject: "Confirm your email — handbill",
 		Text:    "Open this link:\nhttps://dash.example.com/verify-email#token=abc",
 		HTML:    `<p><a href="https://dash.example.com/verify-email#token=abc">Confirm</a></p>`,
 	})
@@ -124,7 +124,7 @@ func TestSend(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject, err := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject"))
-	if err != nil || subject != "Confirm your email — agent-dash" {
+	if err != nil || subject != "Confirm your email — handbill" {
 		t.Fatalf("subject = %q, %v", subject, err)
 	}
 	if !strings.HasPrefix(msg.Header.Get("Content-Type"), "multipart/alternative;") {

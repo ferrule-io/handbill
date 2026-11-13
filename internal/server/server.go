@@ -3,7 +3,7 @@
 // /healthz and /readyz on every non-site host, and 404s unknown hosts.
 //
 // Feature packages never edit this file. Each exposes a Module that registers
-// its own routes on Routes.App and/or Routes.Sites; cmd/agent-dash lists the
+// its own routes on Routes.App and/or Routes.Sites; cmd/handbill lists the
 // modules, one file per feature.
 package server
 
@@ -17,9 +17,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mjquinlan2000/agent-dash/internal/config"
-	"github.com/mjquinlan2000/agent-dash/internal/siteid"
-	"github.com/mjquinlan2000/agent-dash/internal/storage"
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/siteid"
+	"github.com/ferrule-io/handbill/internal/storage"
 )
 
 // Deps are the shared dependencies handed to every module. Modules construct
@@ -31,7 +31,7 @@ type Deps struct {
 	// need no database.
 	DB *pgxpool.Pool
 	// Storage is the object store; nil until a storage adapter is wired in
-	// cmd/agent-dash (workstream W2b).
+	// cmd/handbill (workstream W2b).
 	Storage storage.Store
 }
 

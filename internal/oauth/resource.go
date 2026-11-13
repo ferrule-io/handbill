@@ -1,4 +1,4 @@
-// Package oauth is agent-dash's OAuth 2.1 authorization server for MCP
+// Package oauth is handbill's OAuth 2.1 authorization server for MCP
 // clients (docs/design.md#mcp-authorization): protected-resource and
 // authorization-server metadata, /oauth/authorize with the consent screen's
 // /app-api/oauth/consent endpoints, /oauth/token, /oauth/revoke, optional
@@ -11,7 +11,7 @@
 // as SHA-256 hashes and checked against the database on every request.
 package oauth
 
-import "github.com/mjquinlan2000/agent-dash/internal/config"
+import "github.com/ferrule-io/handbill/internal/config"
 
 // Issuer is the authorization server's issuer identifier, APP_ORIGIN.
 func Issuer(c *config.Config) string { return c.AppOrigin.String() }

@@ -11,7 +11,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mjquinlan2000/agent-dash/internal/sites"
+	"github.com/ferrule-io/handbill/internal/sites"
 )
 
 // Limits on tool input (docs/design.md#mcp-tools).

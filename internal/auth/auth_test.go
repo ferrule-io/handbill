@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mjquinlan2000/agent-dash/internal/db"
+	"github.com/ferrule-io/handbill/internal/db"
 )
 
 func TestPasskeySignUpAndSignIn(t *testing.T) {
@@ -432,7 +432,7 @@ func TestGoogle(t *testing.T) {
 	if me.User == nil || me.User.Email != "ann@gmail.com" || !me.User.EmailVerified {
 		t.Fatalf("google sign-up me = %+v", me.User)
 	}
-	// The same Google account signs into the same agent-dash account.
+	// The same Google account signs into the same handbill account.
 	b2 := e.browser()
 	if loc := location(t, b2.googleRoundTrip(t, googleSignIn, "", fakeGrant{sub: "g-1", email: "ann@gmail.com", verified: true})); loc != "/" {
 		t.Fatalf("returning sign-in redirect %q", loc)
