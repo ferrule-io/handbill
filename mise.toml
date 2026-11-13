@@ -1,0 +1,21 @@
+# Toolchain and local dev environment. `mise install` installs the tools;
+# entering the directory with mise activated exports [env].
+
+[tools]
+go = "1.27"
+node = "24"
+pnpm = "10.30.3"
+helm = "4"
+kubectl = "1.37"
+kind = "0.33"
+
+# Local development only (see docs/design.md#configuration). The app is on
+# http://dash.localhost:8080 and sites on http://<id>.sites.localhost:8080;
+# browsers resolve *.localhost to loopback. PostgreSQL comes from compose.yaml.
+[env]
+APP_ORIGIN = "http://dash.localhost:8080"
+SITES_DOMAIN = "sites.localhost"
+SECRET_KEY = "dev-only-secret-key-change-me-0123456789abcdef"
+DATABASE_URL = "postgres://agentdash:agentdash@localhost:55432/agentdash?sslmode=disable"
+STORAGE_TYPE = "local"
+STORAGE_LOCAL_DIR = "{{config_root}}/.data"

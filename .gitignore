@@ -1,0 +1,8 @@
+# Build output
+/bin/
+# Web export copied in by `make web`; .gitkeep keeps `go build` working without it
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+# Local storage adapter data in development
+/.data/
+.DS_Store
