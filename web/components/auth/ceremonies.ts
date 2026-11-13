@@ -84,6 +84,6 @@ export const googleErrors: Record<string, string> = {
   google_disabled: "Google sign-in isn't enabled on this server.",
   email_in_use:
     "An account already uses that Google email. Sign in with its passkey, then link Google from Settings → Security.",
-  google_linked_elsewhere: "That Google account is already linked to a different agent-dash account.",
+  google_linked_elsewhere: "That Google account is already linked to a different handbill account.",
   google_already_linked: "A Google account is already linked. Unlink it first to link another.",
 }

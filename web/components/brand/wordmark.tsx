@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 
-/** The agent-dash mark: an ink plate holding a dog-eared page and a vermilion dash. */
+/** The handbill mark: an ink plate holding a dog-eared page and a vermilion dash. */
 export function Mark({ className }: { className?: string }) {
   return (
     <svg
@@ -17,7 +17,7 @@ export function Mark({ className }: { className?: string }) {
 }
 
 /**
- * Mark plus the "agent—dash" logotype set in the display serif. `collapse`
+ * Mark plus the "handbill" logotype set in the display serif. `collapse`
  * hides the logotype below the sm breakpoint (crowded mobile headers).
  */
 export function Wordmark({ className, collapse = false }: { className?: string; collapse?: boolean }) {
@@ -30,7 +30,7 @@ export function Wordmark({ className, collapse = false }: { className?: string; 
           collapse && "sr-only sm:not-sr-only"
         )}
       >
-        agent<span className="text-brand">—</span>dash
+        handbill
       </span>
     </span>
   )

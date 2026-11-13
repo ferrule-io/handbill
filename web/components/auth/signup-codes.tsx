@@ -70,7 +70,7 @@ export function SignupCodes() {
           disabled={!saved || !codes}
           onClick={() => window.location.assign(returnTo ?? "/")}
         >
-          Continue to agent-dash
+          Continue to handbill
           <ArrowRightIcon data-icon="inline-end" />
         </Button>
         <p className="text-center font-mono text-[0.7rem] text-muted-foreground">

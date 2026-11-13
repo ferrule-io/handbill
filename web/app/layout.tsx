@@ -10,7 +10,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 export const metadata: Metadata = {
-  title: { default: "agent-dash", template: "%s · agent-dash" },
+  title: { default: "handbill", template: "%s · handbill" },
   description: "Self-hosted static sites published by your agents.",
   robots: { index: false, follow: false },
 }

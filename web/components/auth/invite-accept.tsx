@@ -19,10 +19,10 @@ import { fragmentParam, useHash } from "@/lib/params"
  * accepted automatically on return, and the stored token is then cleared.
  */
 
-const TOKEN_KEY = "agent-dash.invite.token"
+const TOKEN_KEY = "handbill.invite.token"
 // Set when the visitor leaves to sign up or sign in from this page, so the
 // return accepts without another click.
-const AUTO_KEY = "agent-dash.invite.auto"
+const AUTO_KEY = "handbill.invite.auto"
 
 type Lookup = {
   kind: "invite" | "transfer"
@@ -318,7 +318,7 @@ function Notice({
       <TokenTail token={token} />
       {action ?? (
         <Button asChild variant="outline" size="xl">
-          <Link href="/">Go to agent-dash</Link>
+          <Link href="/">Go to handbill</Link>
         </Button>
       )}
     </div>

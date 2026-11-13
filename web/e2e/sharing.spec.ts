@@ -86,13 +86,13 @@ test("an invite link signs a new person up and lands them on the site", async ({
   await guest.getByRole("button", { name: "Create with passkey" }).click()
   await expect(guest).toHaveURL(/\/signup\/codes/)
   await guest.getByLabel(/saved my recovery codes/).check()
-  await guest.getByRole("button", { name: "Continue to agent-dash" }).click()
+  await guest.getByRole("button", { name: "Continue to handbill" }).click()
 
   // Back on /invite, the invite is accepted automatically.
   await expect(guest).toHaveURL(`/site?id=${s.siteId}&welcome=1`)
   await expect(guest.getByTestId("welcome-banner")).toContainText("You’re in as a viewer")
   await expect(guest.getByTestId("site-title")).toHaveText("Car shortlist")
-  expect(await guest.evaluate(() => sessionStorage.getItem("agent-dash.invite.token"))).toBeNull()
+  expect(await guest.evaluate(() => sessionStorage.getItem("handbill.invite.token"))).toBeNull()
 
   const [site] = await Promise.all([fresh.waitForEvent("page"), guest.getByTestId("welcome-open-site").click()])
   await expect(site).toHaveURL(`${siteOrigin(baseURL!, s.siteId)}/`)

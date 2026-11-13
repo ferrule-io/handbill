@@ -78,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 pb-24">{user ? children : <PageSkeleton />}</main>
       <footer className="border-t border-border/70">
         <Container size="wide" className="flex h-14 items-center justify-between font-mono text-xs text-muted-foreground">
-          <span>agent-dash</span>
+          <span>handbill</span>
           <span>self-hosted output for agents</span>
         </Container>
       </footer>

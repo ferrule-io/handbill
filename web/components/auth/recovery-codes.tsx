@@ -26,7 +26,7 @@ export function RecoveryCodes({ codes, email, className }: { codes: string[] | n
     const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }))
     const a = document.createElement("a")
     a.href = url
-    a.download = `agent-dash-recovery-codes-${location.hostname}.txt`
+    a.download = `handbill-recovery-codes-${location.hostname}.txt`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -66,7 +66,7 @@ export function RecoveryCodes({ codes, email, className }: { codes: string[] | n
 }
 
 function recoveryFile(codes: string[], email?: string) {
-  const lines = ["agent-dash recovery codes"]
+  const lines = ["handbill recovery codes"]
   if (typeof location !== "undefined") lines.push(`Server:  ${location.origin}`)
   if (email) lines.push(`Account: ${email}`)
   lines.push(
