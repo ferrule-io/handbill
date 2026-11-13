@@ -65,20 +65,15 @@ some access control, without the publisher keeping anything running.
 - **Public links**: optional per-site "anyone with the link" access.
 - **Lifecycle**: sites are updatable in place; an update keeps the same URL so
   viewers (e.g. a daily dashboard) see the new content. Every publish is a
-  retained version with rollback. No expiration for now.
-- **Publishing interface**: the server exposes an MCP endpoint at `/mcp`,
-  authorized with OAuth 2.1 using Client ID Metadata Documents.
+  retained version with rollback; no retention limit. Sites do not expire;
+  pending invites and ownership transfers do.
+- **Publishing interface**: MCP only, at `/mcp` — the product is for agents.
+  No CLI or general HTTP API for now. Authorized with OAuth 2.1 using Client ID
+  Metadata Documents (supported by the target clients); Dynamic Client
+  Registration is available behind a flag, off by default.
 - **URLs**: app on its own host; each site on a random subdomain under a
   dedicated sites domain (`<site-id>.sites.example.com`).
 - **Storage**: pluggable adapter with S3, GCS, and local filesystem
   implementations.
-
-## Open questions
-
-- Do the target MCP clients (Claude Code, Claude Desktop, claude.ai) support
-  CIMD? If not, a Dynamic Client Registration fallback is needed.
-- Are other publish interfaces (HTTP API, CLI) needed besides MCP?
-- Should pending invites and ownership transfers expire?
-- Version retention limit, if any.
 
 Design details: [docs/design.md](docs/design.md).

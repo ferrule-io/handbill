@@ -35,6 +35,7 @@ with the app or with each other (URL option B).
 | `/.well-known/oauth-protected-resource` | Protected resource metadata for `/mcp` |
 | `/.well-known/oauth-authorization-server` | AS metadata, `client_id_metadata_document_supported: true` |
 | `/oauth/authorize`, `/oauth/token` | OAuth 2.1 |
+| `/oauth/register` | Dynamic Client Registration; only when `OAUTH_DCR_ENABLED=true` |
 | `/api/deployments/<id>/archive` | Archive upload target returned by `get_upload_url` |
 
 ### Site sign-in handoff
@@ -101,7 +102,8 @@ do not stop an artifact from sending credentialed requests to the app. Required:
 - The grant binds to whichever account accepts the invite link. It is applied
   automatically, without the link, only to an existing account whose matching
   email is verified.
-- Invites are single use and can be revoked while pending.
+- Invites are single use, expire after `INVITE_TTL` (default 14 days), and can
+  be revoked while pending.
 
 ## Roles
 
@@ -118,21 +120,27 @@ do not stop an artifact from sending credentialed requests to the app. Required:
 
 - Exactly one owner per site.
 - Ownership transfer targets an email and completes when the recipient accepts
-  (same binding rules as invites). The previous owner becomes a manager.
+  (same binding rules and `INVITE_TTL` expiry as invites). The previous owner
+  becomes a manager.
 
 ## Versions
 
 Every publish creates an immutable version; the site serves its current
-version. Previous versions are kept and any can be restored with
-`rollback_site`, which repoints the site (no copy). Publishing is atomic:
-viewers see either the old version or the new one.
+version. All previous versions are kept (no retention limit) and any can be
+restored with `rollback_site`, which repoints the site (no copy). Publishing is
+atomic: viewers see either the old version or the new one.
 
 ## MCP authorization
 
 - OAuth 2.1 per the MCP authorization spec (2025-11-25), with PKCE (S256) and
   resource indicators binding tokens to `APP_ORIGIN/mcp`.
-- Client registration via Client ID Metadata Documents (CIMD) only: the
+- Client registration via Client ID Metadata Documents (CIMD): the
   `client_id` is an HTTPS URL to the client's metadata JSON.
+- Dynamic Client Registration (RFC 7591) is off by default. With
+  `OAUTH_DCR_ENABLED=true`, `/oauth/register` is served and advertised as
+  `registration_endpoint` in AS metadata. Registration is unauthenticated, so it
+  is rate-limited, accepts only `https` or loopback `http` redirect URIs, and the
+  consent screen labels DCR clients as unverified.
 - CIMD fetching is an SSRF surface: HTTPS only, resolve and reject private,
   loopback, and link-local addresses, short timeout, response size cap, no
   redirects to disallowed hosts, cache per HTTP headers. Verify the document's
