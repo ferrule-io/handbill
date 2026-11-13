@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 
+import { signUp, uniqueEmail, VirtualAuthenticator } from "./support/passkeys"
+
 // Routing acceptance check (docs/design.md, "Frontend"): fixed routes with
 // ids chosen at runtime must render on direct load and on client-side
 // <Link> navigation; unknown paths get the export's 404; site hosts never
@@ -25,10 +27,13 @@ async function expectSameDocument(page: Page) {
   expect(await page.evaluate(() => (window as unknown as { __spa?: boolean }).__spa)).toBe(true)
 }
 
-test.beforeEach(({ page }) => {
+// App pages need a signed-in user (the shell redirects to /login otherwise).
+test.beforeEach(async ({ page }) => {
   page.on("pageerror", (err) => {
     throw err
   })
+  await VirtualAuthenticator.attach(page)
+  await signUp(page, uniqueEmail("routing"))
 })
 
 test("direct load of /site?id=… renders the runtime id", async ({ page }) => {

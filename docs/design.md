@@ -104,7 +104,10 @@ with the app or with each other (URL option B).
 | `/` | Sites the user owns, manages, or can view |
 | `/site?id=<site-id>` | Settings, members, invites, public link, versions |
 | `/invite#token=<token>` | Accept an invite or ownership transfer (signs up or signs in first). The token is in the fragment so it never reaches server or proxy logs. |
-| `/signup`, `/login` | Passkey or Google |
+| `/signup`, `/login` | Passkey or Google; both honor `?return=<same-origin path>` |
+| `/signup/codes` | The new account's first recovery codes, shown once (both sign-up paths land here) |
+| `/login/recover` | Recovery code sign-in, then registering a new passkey |
+| `/verify-email#token=<token>` | Consumes an email verification link (fragment, like invites) |
 | `/auth/google/callback` | Google OIDC callback |
 | `/auth/site` | Issues site tickets (handoff below) |
 | `/settings/security` | Passkeys, linked Google identity, recovery codes, OAuth grants |
@@ -151,6 +154,11 @@ do not stop an artifact from sending credentialed requests to the app. Required:
   `/oauth/authorize` consent) checks `Origin` exactly equals `APP_ORIGIN` and
   validates a CSRF token.
 - App cookies use the `__Host-` prefix so site hosts cannot set or overwrite them.
+- The CSRF token is an HMAC (`SECRET_KEY`) of a random `__Host-csrf` cookie
+  (HttpOnly), returned by `GET /app-api/me` and sent as `X-CSRF-Token`; it
+  applies to public endpoints too (sign-up, sign-in, sign-out), so a site
+  cannot start ceremonies or sign the viewer out. `appapi` also requires
+  `Content-Type: application/json` for request bodies.
 - Non-cookie endpoints are exempt from the Origin/CSRF check and never accept
   the session cookie: `/mcp` (bearer token), `/oauth/token` (PKCE/client
   authentication), and `/api/deployments/<id>/archive` (signed short-lived URL).
@@ -184,17 +192,48 @@ Consequences:
 
 - Anyone can sign up and create sites.
 - Sign-in methods: passkey (WebAuthn) or Google OIDC. No passwords.
+- Sign-up is one screen: an email and "Create with passkey", or "Continue
+  with Google" (shown only when Google is configured; `GET /app-api/me`
+  reports `googleEnabled` and `mailEnabled`). Passkeys are registered as
+  discoverable (resident key preferred, user verification preferred), so
+  sign-in is usernameless; an email-first fallback limits the prompt to the
+  passkeys of the accounts claiming that address (its verified holder, else
+  every unverified claim). The WebAuthn RP ID is `APP_ORIGIN`'s host and the
+  only accepted origin is `APP_ORIGIN`; the user handle is the user id.
+  Sign counts are stored; a counter that goes backwards sets
+  `clone_warning` and refuses that sign-in.
+- Ceremony state (WebAuthn challenges; Google state, nonce, and PKCE
+  verifier) lives in `auth_flows`, hashed, single use, 10-minute expiry. The
+  Google round trip is also bound to the browser by a `__Host-google-flow`
+  cookie that must equal `state`, and starts with a CSRF-protected POST.
 - Email verification:
   - Google: verified when the ID token has `email_verified: true`.
   - Passkey sign-up: the typed email is unverified unless SMTP is configured and
-    the user confirms a verification link.
+    the user confirms a verification link (`/verify-email#token=`, single use,
+    24 hours; resend from settings). Verifying displaces other accounts'
+    unverified claims; an address another account holds verified cannot be
+    verified again.
 - Google identities are linked to an existing account only explicitly, from
   `/settings/security` while signed in. A Google sign-in with a new `sub` creates
   a new account; if another account holds the same email unverified, that
-  account loses the email claim.
-- Recovery codes: 10 single-use codes generated at sign-up and shown once,
-  stored hashed. A code signs the user in to register a new passkey.
-  Regenerating invalidates all previous codes.
+  account loses the email claim. If another account holds it verified, no
+  account is created and the sign-in page says to sign in with a passkey and
+  link Google from settings.
+- An account always keeps one sign-in method: removing the last passkey or
+  unlinking Google when it is the only method is refused.
+- Recovery codes: 10 single-use codes issued right after sign-up (on
+  `/signup/codes`) and shown once, stored hashed. An email plus a code opens a
+  restricted session (15 minutes, never renewed, not visible to other
+  packages as `identity.User`) whose only power is registering a new
+  passkey; doing so replaces it with a normal session. Regenerating
+  invalidates all previous codes.
+- Sessions: `__Host-session` cookie (Secure, HttpOnly, SameSite=Lax, Path=/)
+  holding a random token whose SHA-256 is stored. A session expires after 30
+  days without use and at most 90 days after sign-in; use renews the idle
+  deadline at most once an hour. Every sign-in replaces the browser's
+  previous session. Settings lists sessions and signs out the others.
+- Return paths (`?return=`) must start with a single `/`, with no `//`
+  prefix, backslash, or control characters; anything else falls back to `/`.
 
 ## Sharing
 

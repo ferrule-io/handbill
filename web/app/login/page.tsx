@@ -1,10 +1,12 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 
-import { SignInOptions } from "@/components/auth/sign-in-options"
+import { LoginForm } from "@/components/auth/login-form"
 import { AuthShell } from "@/components/layout/auth-shell"
 
 export const metadata: Metadata = { title: "Sign in" }
 
+// /login?return=<same-origin path>&error=<code>
 export default function LoginPage() {
   return (
     <AuthShell
@@ -14,7 +16,9 @@ export default function LoginPage() {
         </>
       }
     >
-      <SignInOptions mode="login" />
+      <Suspense>
+        <LoginForm />
+      </Suspense>
     </AuthShell>
   )
 }

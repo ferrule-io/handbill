@@ -321,7 +321,7 @@ func Run(t *testing.T, newStore func(t *testing.T) storage.Store)
 Done when: the contract suite passes against local, S3 (MinIO), and GCS
 (fake-gcs-server) in CI.
 
-## W3 Accounts and sessions
+## W3 Accounts and sessions — done
 
 Owns: `internal/auth/` (WebAuthn, Google OIDC, sessions, recovery codes,
 email verification), `internal/appapi/`, `internal/mail/`, routes
@@ -339,6 +339,12 @@ package auth
 func Register(r *server.Routes, d *server.Deps) error
 // SignOut and session revocation for other packages (e.g. account deletion).
 func RevokeSessions(ctx context.Context, q *db.Queries, userID uuid.UUID) error
+// Added: login redirects for pages and endpoints that need a user
+// (e.g. /auth/site, /oauth/authorize), and the return-path rule.
+func LoginURL(r *http.Request) string            // /login?return=<path+query>
+func RedirectToLogin(w http.ResponseWriter, r *http.Request) // 303 to LoginURL
+func SafeReturn(s string) bool
+const SessionCookie = "__Host-session"
 ```
 
 ```go
@@ -352,13 +358,37 @@ func Public() Option
 // Error is rendered as {"error": {"code": ..., "message": ...}} with Status.
 type Error struct { Status int; Code, Message string }
 func (e *Error) Error() string
+func NewError(status int, code, message string) *Error // added
 func WriteJSON(w http.ResponseWriter, status int, v any)
-func ReadJSON(r *http.Request, v any) error // size-capped, unknown fields rejected
+func ReadJSON(r *http.Request, v any) error // ≤ MaxBodyBytes (1 MiB), application/json, unknown fields rejected
+// Added: the CSRF token for this browser (sets __Host-csrf when absent),
+// and the module that claims /app-api/ (cmd/agent-dash/module_appapi.go).
+func CSRFToken(w http.ResponseWriter, r *http.Request, d *server.Deps) string
+func Register(r *server.Routes, d *server.Deps) error
 ```
 
-`GET /app-api/me` returns `{"user": {…} | null, "csrfToken": "…"}`; the UI
-sends the token in `X-CSRF-Token`. `appapi` also claims `/app-api/` so
+`GET /app-api/me` returns `{"user": {id, email, emailVerified} | null,
+"recovery": bool, "csrfToken": "…", "googleEnabled": bool, "mailEnabled":
+bool}`; the UI sends the token in `X-CSRF-Token`. `appapi` also claims
+`/app-api/` (as `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS
+/app-api/`, since a bare `/app-api/` conflicts with the UI's `GET /`) so
 unknown endpoints get a JSON 404 instead of the UI's 404 page.
+
+`identity.User` is set only for normal sessions; a recovery session is
+private to `internal/auth`. `Email` is the primary address (empty for a
+Google account without one).
+
+Frontend (`web/lib/api.ts`): `api<T>(path, {method, body, signal})`,
+`ApiError {status, code}`, `useMe()` → `{user, loading, recovery,
+googleEnabled, mailEnabled}`, `refreshMe()`, `errorMessage(err)`,
+`safeReturn(value)`, `loginHref(path)`. `AppShell` sends signed-out visitors
+of `(app)` pages to `/login?return=…` and renders children only for a
+signed-in user. E2e helpers: `web/e2e/support/passkeys.ts`
+(`VirtualAuthenticator`, `signUp`, `signOut`, `uniqueEmail`).
+
+Schema: migration `20261113140000_auth_flows.sql` adds
+`sessions.restricted` and `auth_flows` (ceremony state); queries in
+`queries/auth.sql` and `queries/accounts.sql`.
 
 ```go
 package mail

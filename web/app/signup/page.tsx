@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 
-import { SignInOptions } from "@/components/auth/sign-in-options"
+import { SignupForm } from "@/components/auth/signup-form"
 import { AuthShell } from "@/components/layout/auth-shell"
 
 export const metadata: Metadata = { title: "Create account" }
@@ -14,7 +15,9 @@ export default function SignupPage() {
         </>
       }
     >
-      <SignInOptions mode="signup" />
+      <Suspense>
+        <SignupForm />
+      </Suspense>
     </AuthShell>
   )
 }
