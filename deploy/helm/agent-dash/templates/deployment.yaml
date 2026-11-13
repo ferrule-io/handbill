@@ -1,0 +1,250 @@
+{{/* Validate database configuration */}}
+{{- if not .Values.postgresql.enabled }}
+  {{- $hasDsn := and .Values.externalDatabase.existingSecret .Values.externalDatabase.existingSecretDsnKey -}}
+  {{- if and (not $hasDsn) (not .Values.externalDatabase.host) }}
+    {{- fail "agent-dash requires a database: either set postgresql.enabled=true or configure externalDatabase (set externalDatabase.host or externalDatabase.existingSecret with existingSecretDsnKey)" }}
+  {{- end }}
+{{- end }}
+{{/* Validate local storage replica count and access mode */}}
+{{- if and (eq .Values.storage.type "local") (gt (int .Values.replicaCount) 1) (not (has "ReadWriteMany" .Values.persistence.accessModes)) }}
+  {{- fail "storage.type=local with replicaCount > 1 requires a ReadWriteMany (RWX) volume: set persistence.accessModes to [ReadWriteMany] or use s3/gcs storage" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-dash.fullname" . }}
+  labels:
+    {{- include "agent-dash.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agent-dash.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "agent-dash.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "agent-dash.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: APP_ORIGIN
+              value: {{ .Values.app.origin | quote }}
+            - name: SITES_DOMAIN
+              value: {{ .Values.app.sitesDomain | quote }}
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-dash.secretKeySecretName" . }}
+                  key: {{ include "agent-dash.secretKeyKey" . }}
+            - name: OAUTH_DCR_ENABLED
+              value: {{ .Values.oauth.dcrEnabled | default false | quote }}
+            - name: INVITE_TTL
+              value: {{ .Values.inviteTTL | default "336h" | quote }}
+{{- if .Values.postgresql.enabled }}
+            - name: PGHOST
+              value: {{ include "agent-dash.postgresqlFullname" . | quote }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.auth.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-dash.postgresqlSecretName" . }}
+                  key: {{ include "agent-dash.postgresqlSecretPasswordKey" . }}
+            - name: PGSSLMODE
+              value: "disable"
+{{- else }}
+  {{- if and .Values.externalDatabase.existingSecret .Values.externalDatabase.existingSecretDsnKey }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.externalDatabase.existingSecret }}
+                  key: {{ .Values.externalDatabase.existingSecretDsnKey }}
+  {{- else }}
+            - name: PGHOST
+              value: {{ .Values.externalDatabase.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.externalDatabase.port | default 5432 | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.externalDatabase.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.externalDatabase.user | quote }}
+            - name: PGSSLMODE
+              value: {{ .Values.externalDatabase.sslmode | default "prefer" | quote }}
+    {{- if or .Values.externalDatabase.existingSecret .Values.externalDatabase.password }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-dash.externalDatabaseSecretName" . }}
+                  key: {{ include "agent-dash.externalDatabaseSecretPasswordKey" . }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+            - name: STORAGE_TYPE
+              value: {{ .Values.storage.type | quote }}
+{{- if eq .Values.storage.type "local" }}
+            - name: STORAGE_LOCAL_DIR
+              value: {{ .Values.storage.local.dir | default "/data" | quote }}
+{{- else if eq .Values.storage.type "s3" }}
+            - name: S3_BUCKET
+              value: {{ .Values.storage.s3.bucket | quote }}
+            - name: S3_REGION
+              value: {{ .Values.storage.s3.region | quote }}
+  {{- if .Values.storage.s3.endpoint }}
+            - name: S3_ENDPOINT
+              value: {{ .Values.storage.s3.endpoint | quote }}
+  {{- end }}
+  {{- if .Values.storage.s3.prefix }}
+            - name: S3_PREFIX
+              value: {{ .Values.storage.s3.prefix | quote }}
+  {{- end }}
+  {{- if hasKey .Values.storage.s3 "forcePathStyle" }}
+            - name: S3_FORCE_PATH_STYLE
+              value: {{ .Values.storage.s3.forcePathStyle | quote }}
+  {{- end }}
+  {{- if .Values.storage.s3.existingSecret }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.s3.existingSecret }}
+                  key: {{ .Values.storage.s3.accessKeyIdKey | default "AWS_ACCESS_KEY_ID" }}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.s3.existingSecret }}
+                  key: {{ .Values.storage.s3.secretAccessKeyKey | default "AWS_SECRET_ACCESS_KEY" }}
+  {{- end }}
+{{- else if eq .Values.storage.type "gcs" }}
+            - name: GCS_BUCKET
+              value: {{ .Values.storage.gcs.bucket | quote }}
+  {{- if .Values.storage.gcs.prefix }}
+            - name: GCS_PREFIX
+              value: {{ .Values.storage.gcs.prefix | quote }}
+  {{- end }}
+  {{- if .Values.storage.gcs.existingSecret }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "{{ .Values.storage.gcs.mountPath | default "/etc/gcp" }}/{{ .Values.storage.gcs.keyFileKey | default "service-account-key.json" }}"
+  {{- end }}
+{{- end }}
+{{- if .Values.smtp.enabled }}
+            - name: SMTP_HOST
+              value: {{ .Values.smtp.host | quote }}
+            - name: SMTP_PORT
+              value: {{ .Values.smtp.port | default 587 | quote }}
+  {{- if .Values.smtp.username }}
+            - name: SMTP_USERNAME
+              value: {{ .Values.smtp.username | quote }}
+  {{- end }}
+  {{- if or .Values.smtp.existingSecret .Values.smtp.password }}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-dash.smtpSecretName" . }}
+                  key: {{ include "agent-dash.smtpSecretPasswordKey" . }}
+  {{- end }}
+  {{- if .Values.smtp.from }}
+            - name: SMTP_FROM
+              value: {{ .Values.smtp.from | quote }}
+  {{- end }}
+            - name: SMTP_TLS
+              value: {{ .Values.smtp.tls | default "starttls" | quote }}
+{{- end }}
+{{- if .Values.google.clientId }}
+            - name: GOOGLE_CLIENT_ID
+              value: {{ .Values.google.clientId | quote }}
+{{- end }}
+{{- if and .Values.google.existingSecret .Values.google.existingSecretClientSecretKey }}
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.google.existingSecret }}
+                  key: {{ .Values.google.existingSecretClientSecretKey }}
+{{- end }}
+{{- with .Values.extraEnv }}
+{{ toYaml . | nindent 12 }}
+{{- end }}
+{{- with .Values.extraEnvFrom }}
+          envFrom:
+{{ toYaml . | nindent 12 }}
+{{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+{{- if eq .Values.storage.type "local" }}
+            - name: data
+              mountPath: {{ .Values.storage.local.dir | default "/data" }}
+{{- else if and (eq .Values.storage.type "gcs") .Values.storage.gcs.existingSecret }}
+            - name: gcs-credentials
+              mountPath: {{ .Values.storage.gcs.mountPath | default "/etc/gcp" }}
+              readOnly: true
+{{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if eq .Values.storage.type "local" }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "agent-dash.fullname" . }}-data
+{{- else if and (eq .Values.storage.type "gcs") .Values.storage.gcs.existingSecret }}
+        - name: gcs-credentials
+          secret:
+            secretName: {{ .Values.storage.gcs.existingSecret }}
+{{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

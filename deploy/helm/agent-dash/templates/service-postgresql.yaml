@@ -1,0 +1,17 @@
+{{- if .Values.postgresql.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-dash.postgresqlFullname" . }}
+  labels:
+    {{- include "agent-dash.postgresqlLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: postgresql
+      protocol: TCP
+      name: postgresql
+  selector:
+    {{- include "agent-dash.postgresqlSelectorLabels" . | nindent 4 }}
+{{- end }}

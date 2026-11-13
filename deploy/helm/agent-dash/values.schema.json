@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "agent-dash values",
+  "type": "object",
+  "required": [
+    "app",
+    "storage",
+    "postgresql"
+  ],
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": ["repository", "pullPolicy"]
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "automount": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "port": { "type": "integer" }
+      }
+    },
+    "app": {
+      "type": "object",
+      "required": ["origin", "sitesDomain"],
+      "properties": {
+        "origin": {
+          "type": "string"
+        },
+        "sitesDomain": {
+          "type": "string"
+        }
+      }
+    },
+    "secretKey": {
+      "type": "object",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullPolicy": { "type": "string" }
+          }
+        },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "database": { "type": "string" },
+            "username": { "type": "string" },
+            "password": { "type": "string" },
+            "existingSecret": { "type": "string" },
+            "existingSecretPasswordKey": { "type": "string" }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "storageClass": { "type": "string" },
+            "accessModes": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "size": { "type": "string" }
+          }
+        }
+      }
+    },
+    "externalDatabase": {
+      "type": "object",
+      "properties": {
+        "host": { "type": "string" },
+        "port": { "type": "integer" },
+        "database": { "type": "string" },
+        "user": { "type": "string" },
+        "password": { "type": "string" },
+        "sslmode": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretPasswordKey": { "type": "string" },
+        "existingSecretDsnKey": { "type": "string" }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["local", "s3", "gcs"]
+        },
+        "local": {
+          "type": "object",
+          "properties": {
+            "dir": { "type": "string" }
+          }
+        },
+        "s3": {
+          "type": "object",
+          "properties": {
+            "bucket": { "type": "string" },
+            "region": { "type": "string" },
+            "endpoint": { "type": "string" },
+            "prefix": { "type": "string" },
+            "forcePathStyle": { "type": "boolean" },
+            "existingSecret": { "type": "string" },
+            "accessKeyIdKey": { "type": "string" },
+            "secretAccessKeyKey": { "type": "string" }
+          }
+        },
+        "gcs": {
+          "type": "object",
+          "properties": {
+            "bucket": { "type": "string" },
+            "prefix": { "type": "string" },
+            "existingSecret": { "type": "string" },
+            "keyFileKey": { "type": "string" },
+            "mountPath": { "type": "string" }
+          }
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "storageClass": { "type": "string" },
+        "accessModes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "size": { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "tls": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    },
+    "smtp": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "port": { "type": "integer" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretPasswordKey": { "type": "string" },
+        "from": { "type": "string" },
+        "tls": {
+          "type": "string",
+          "enum": ["starttls", "tls", "none"]
+        }
+      }
+    },
+    "google": {
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretClientSecretKey": { "type": "string" }
+      }
+    },
+    "oauth": {
+      "type": "object",
+      "properties": {
+        "dcrEnabled": { "type": "boolean" }
+      }
+    },
+    "inviteTTL": {
+      "type": "string"
+    }
+  }
+}

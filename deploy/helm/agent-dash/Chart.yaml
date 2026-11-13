@@ -1,0 +1,13 @@
+apiVersion: v2
+name: agent-dash
+description: A Helm chart for agent-dash, a self-hosted output endpoint for agent artifacts
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - agent
+  - mcp
+  - artifacts
+  - static-sites
+maintainers:
+  - name: agent-dash maintainers

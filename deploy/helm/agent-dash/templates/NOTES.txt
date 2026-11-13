@@ -1,0 +1,52 @@
+agent-dash has been deployed!
+
+1. Application URLs:
+{{- if .Values.ingress.enabled }}
+  App UI & MCP:  {{ .Values.app.origin }}
+  Hosted Sites:  https://<site-id>.{{ .Values.app.sitesDomain }}
+
+  DNS Configuration:
+  Ensure the following DNS records point to your ingress controller or load balancer:
+    - {{ include "agent-dash.appHost" . }}
+    - *.{{ .Values.app.sitesDomain }}
+
+  Wildcard TLS:
+  Because each site is served from a random subdomain (<site-id>.{{ .Values.app.sitesDomain }}),
+  a wildcard certificate (*.{{ .Values.app.sitesDomain }}) is required.
+  If using cert-manager, wildcard certificates require a DNS-01 challenge issuer (HTTP-01 cannot issue wildcards).
+{{- else }}
+  Get the application URL by running these commands:
+    export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "{{ include "agent-dash.selectorLabels" . }}" -o jsonpath="{.items[0].metadata.name}")
+    kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:{{ .Values.service.port }}
+
+  Open the App UI at:
+    http://127.0.0.1:8080 (or your configured APP_ORIGIN: {{ .Values.app.origin }})
+
+  Without the chart's Ingress, ensure both:
+    1. {{ include "agent-dash.appHost" . }}
+    2. *.{{ .Values.app.sitesDomain }}
+  are routed to the Service: {{ include "agent-dash.fullname" . }} on port {{ .Values.service.port }} (via your custom Ingress, Gateway API, or reverse proxy / tunnel).
+{{- end }}
+
+2. Database:
+{{- if .Values.postgresql.enabled }}
+  Using bundled PostgreSQL StatefulSet: {{ include "agent-dash.postgresqlFullname" . }}
+{{- else }}
+  Using external PostgreSQL database:
+  {{- if and .Values.externalDatabase.existingSecret .Values.externalDatabase.existingSecretDsnKey }}
+    DSN provided via secret '{{ .Values.externalDatabase.existingSecret }}' (key: '{{ .Values.externalDatabase.existingSecretDsnKey }}')
+  {{- else }}
+    Host: {{ .Values.externalDatabase.host }}:{{ .Values.externalDatabase.port | default 5432 }} (database: {{ .Values.externalDatabase.database }})
+  {{- end }}
+{{- end }}
+
+3. Storage:
+  Storage adapter: {{ .Values.storage.type }}
+{{- if eq .Values.storage.type "local" }}
+  Local storage volume: {{ include "agent-dash.fullname" . }}-data
+  NOTE: If scaling beyond 1 replica, persistence.accessModes must include ReadWriteMany (RWX), or use S3/GCS.
+{{- else if eq .Values.storage.type "s3" }}
+  S3 bucket: {{ .Values.storage.s3.bucket }} (region: {{ .Values.storage.s3.region }})
+{{- else if eq .Values.storage.type "gcs" }}
+  GCS bucket: {{ .Values.storage.gcs.bucket }}
+{{- end }}
