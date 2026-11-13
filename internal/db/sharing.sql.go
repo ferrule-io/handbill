@@ -44,7 +44,40 @@ func (q *Queries) ConsumeInvite(ctx context.Context, arg ConsumeInviteParams) (C
 	return i, err
 }
 
+const consumeTransfer = `-- name: ConsumeTransfer :one
+UPDATE ownership_transfers SET consumed_at = now(), consumed_by = $1
+WHERE token_hash = $2 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+RETURNING id, site_id, email, from_user_id
+`
+
+type ConsumeTransferParams struct {
+	UserID    uuid.NullUUID
+	TokenHash []byte
+}
+
+type ConsumeTransferRow struct {
+	ID         uuid.UUID
+	SiteID     string
+	Email      string
+	FromUserID uuid.NullUUID
+}
+
+// ConsumeTransfer accepts a pending transfer for user_id; no row when it is
+// unknown, already accepted, canceled, or expired.
+func (q *Queries) ConsumeTransfer(ctx context.Context, arg ConsumeTransferParams) (ConsumeTransferRow, error) {
+	row := q.db.QueryRow(ctx, consumeTransfer, arg.UserID, arg.TokenHash)
+	var i ConsumeTransferRow
+	err := row.Scan(
+		&i.ID,
+		&i.SiteID,
+		&i.Email,
+		&i.FromUserID,
+	)
+	return i, err
+}
+
 const createInvite = `-- name: CreateInvite :one
+
 INSERT INTO invites (id, token_hash, site_id, email, role, invited_by, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, token_hash, site_id, email, role, invited_by, created_at, expires_at, consumed_at, consumed_by, revoked_at
@@ -60,6 +93,7 @@ type CreateInviteParams struct {
 	ExpiresAt time.Time
 }
 
+// Invites ---------------------------------------------------------------
 func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error) {
 	row := q.db.QueryRow(ctx, createInvite,
 		arg.ID,
@@ -85,4 +119,564 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const createTransfer = `-- name: CreateTransfer :one
+
+INSERT INTO ownership_transfers (id, token_hash, site_id, email, from_user_id, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, token_hash, site_id, email, from_user_id, created_at, expires_at, consumed_at, consumed_by, revoked_at
+`
+
+type CreateTransferParams struct {
+	ID         uuid.UUID
+	TokenHash  []byte
+	SiteID     string
+	Email      string
+	FromUserID uuid.NullUUID
+	ExpiresAt  time.Time
+}
+
+// Ownership transfers -----------------------------------------------------
+func (q *Queries) CreateTransfer(ctx context.Context, arg CreateTransferParams) (OwnershipTransfer, error) {
+	row := q.db.QueryRow(ctx, createTransfer,
+		arg.ID,
+		arg.TokenHash,
+		arg.SiteID,
+		arg.Email,
+		arg.FromUserID,
+		arg.ExpiresAt,
+	)
+	var i OwnershipTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.SiteID,
+		&i.Email,
+		&i.FromUserID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const deleteMembership = `-- name: DeleteMembership :execrows
+DELETE FROM memberships WHERE site_id = $1 AND user_id = $2 AND role <> 'owner'
+`
+
+type DeleteMembershipParams struct {
+	SiteID string
+	UserID uuid.UUID
+}
+
+// DeleteMembership removes a non-owner member.
+func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteMembership, arg.SiteID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const demoteOwner = `-- name: DemoteOwner :execrows
+UPDATE memberships SET role = 'manager', updated_at = now()
+WHERE site_id = $1 AND user_id = $2 AND role = 'owner'
+`
+
+type DemoteOwnerParams struct {
+	SiteID string
+	UserID uuid.UUID
+}
+
+// The three statements of a completed transfer, in this order inside one
+// transaction: memberships_one_owner is checked per statement, so the old
+// owner is demoted before the new one is promoted; sites_owner_membership
+// is deferred to commit.
+func (q *Queries) DemoteOwner(ctx context.Context, arg DemoteOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, demoteOwner, arg.SiteID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const disablePublicLink = `-- name: DisablePublicLink :execrows
+UPDATE public_links SET enabled = false, updated_at = now() WHERE site_id = $1 AND enabled
+`
+
+func (q *Queries) DisablePublicLink(ctx context.Context, siteID string) (int64, error) {
+	result, err := q.db.Exec(ctx, disablePublicLink, siteID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const enablePublicLink = `-- name: EnablePublicLink :one
+INSERT INTO public_links (site_id, token_hash) VALUES ($1, $2)
+ON CONFLICT (site_id) DO UPDATE
+SET token_hash = EXCLUDED.token_hash, enabled = true, generation = public_links.generation + 1, updated_at = now()
+WHERE NOT public_links.enabled
+RETURNING site_id, token_hash, enabled, generation, created_at, updated_at
+`
+
+type EnablePublicLinkParams struct {
+	SiteID    string
+	TokenHash []byte
+}
+
+// EnablePublicLink creates the link, or turns a disabled one back on with a
+// new token and the next generation; no row when it is already enabled.
+func (q *Queries) EnablePublicLink(ctx context.Context, arg EnablePublicLinkParams) (PublicLink, error) {
+	row := q.db.QueryRow(ctx, enablePublicLink, arg.SiteID, arg.TokenHash)
+	var i PublicLink
+	err := row.Scan(
+		&i.SiteID,
+		&i.TokenHash,
+		&i.Enabled,
+		&i.Generation,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getInviteByToken = `-- name: GetInviteByToken :one
+SELECT i.id, i.site_id, i.email, i.role, i.expires_at, i.consumed_at, i.consumed_by, i.revoked_at,
+       s.title AS site_title, e.email AS invited_by_email
+FROM invites i
+JOIN sites s ON s.id = i.site_id
+LEFT JOIN emails e ON e.user_id = i.invited_by AND e.is_primary
+WHERE i.token_hash = $1
+`
+
+type GetInviteByTokenRow struct {
+	ID             uuid.UUID
+	SiteID         string
+	Email          string
+	Role           string
+	ExpiresAt      time.Time
+	ConsumedAt     *time.Time
+	ConsumedBy     uuid.NullUUID
+	RevokedAt      *time.Time
+	SiteTitle      string
+	InvitedByEmail *string
+}
+
+// GetInviteByToken returns an invite in any state, with what the invite
+// page shows its holder.
+func (q *Queries) GetInviteByToken(ctx context.Context, tokenHash []byte) (GetInviteByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getInviteByToken, tokenHash)
+	var i GetInviteByTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.SiteID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+		&i.SiteTitle,
+		&i.InvitedByEmail,
+	)
+	return i, err
+}
+
+const getPendingInvite = `-- name: GetPendingInvite :one
+SELECT id, token_hash, site_id, email, role, invited_by, created_at, expires_at, consumed_at, consumed_by, revoked_at FROM invites
+WHERE id = $1 AND site_id = $2 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+`
+
+type GetPendingInviteParams struct {
+	ID     uuid.UUID
+	SiteID string
+}
+
+func (q *Queries) GetPendingInvite(ctx context.Context, arg GetPendingInviteParams) (Invite, error) {
+	row := q.db.QueryRow(ctx, getPendingInvite, arg.ID, arg.SiteID)
+	var i Invite
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.SiteID,
+		&i.Email,
+		&i.Role,
+		&i.InvitedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const getPendingTransfer = `-- name: GetPendingTransfer :one
+SELECT id, token_hash, site_id, email, from_user_id, created_at, expires_at, consumed_at, consumed_by, revoked_at FROM ownership_transfers
+WHERE site_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetPendingTransfer(ctx context.Context, siteID string) (OwnershipTransfer, error) {
+	row := q.db.QueryRow(ctx, getPendingTransfer, siteID)
+	var i OwnershipTransfer
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.SiteID,
+		&i.Email,
+		&i.FromUserID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const getPublicLink = `-- name: GetPublicLink :one
+
+SELECT site_id, token_hash, enabled, generation, created_at, updated_at FROM public_links WHERE site_id = $1
+`
+
+// Public links ------------------------------------------------------------
+func (q *Queries) GetPublicLink(ctx context.Context, siteID string) (PublicLink, error) {
+	row := q.db.QueryRow(ctx, getPublicLink, siteID)
+	var i PublicLink
+	err := row.Scan(
+		&i.SiteID,
+		&i.TokenHash,
+		&i.Enabled,
+		&i.Generation,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPublicLinkByToken = `-- name: GetPublicLinkByToken :one
+SELECT site_id, enabled, generation FROM public_links WHERE token_hash = $1
+`
+
+type GetPublicLinkByTokenRow struct {
+	SiteID     string
+	Enabled    bool
+	Generation int64
+}
+
+func (q *Queries) GetPublicLinkByToken(ctx context.Context, tokenHash []byte) (GetPublicLinkByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getPublicLinkByToken, tokenHash)
+	var i GetPublicLinkByTokenRow
+	err := row.Scan(&i.SiteID, &i.Enabled, &i.Generation)
+	return i, err
+}
+
+const getTransferByToken = `-- name: GetTransferByToken :one
+SELECT t.id, t.site_id, t.email, t.expires_at, t.consumed_at, t.consumed_by, t.revoked_at,
+       s.title AS site_title, e.email AS from_email
+FROM ownership_transfers t
+JOIN sites s ON s.id = t.site_id
+LEFT JOIN emails e ON e.user_id = t.from_user_id AND e.is_primary
+WHERE t.token_hash = $1
+`
+
+type GetTransferByTokenRow struct {
+	ID         uuid.UUID
+	SiteID     string
+	Email      string
+	ExpiresAt  time.Time
+	ConsumedAt *time.Time
+	ConsumedBy uuid.NullUUID
+	RevokedAt  *time.Time
+	SiteTitle  string
+	FromEmail  *string
+}
+
+func (q *Queries) GetTransferByToken(ctx context.Context, tokenHash []byte) (GetTransferByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getTransferByToken, tokenHash)
+	var i GetTransferByTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.SiteID,
+		&i.Email,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.ConsumedBy,
+		&i.RevokedAt,
+		&i.SiteTitle,
+		&i.FromEmail,
+	)
+	return i, err
+}
+
+const grantMembership = `-- name: GrantMembership :exec
+INSERT INTO memberships (site_id, user_id, role) VALUES ($1, $2, $3)
+ON CONFLICT (site_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()
+WHERE memberships.role = 'viewer' AND EXCLUDED.role = 'manager'
+`
+
+type GrantMembershipParams struct {
+	SiteID string
+	UserID uuid.UUID
+	Role   string
+}
+
+// GrantMembership gives user_id role on a site without ever lowering an
+// existing role: a viewer may become a manager; managers and the owner are
+// left as they are. role must be 'manager' or 'viewer'.
+func (q *Queries) GrantMembership(ctx context.Context, arg GrantMembershipParams) error {
+	_, err := q.db.Exec(ctx, grantMembership, arg.SiteID, arg.UserID, arg.Role)
+	return err
+}
+
+const listMembers = `-- name: ListMembers :many
+
+
+SELECT m.user_id, m.role, m.created_at, e.email
+FROM memberships m
+LEFT JOIN emails e ON e.user_id = m.user_id AND e.is_primary
+WHERE m.site_id = $1
+ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, e.email NULLS LAST, m.created_at
+`
+
+type ListMembersRow struct {
+	UserID    uuid.UUID
+	Role      string
+	CreatedAt time.Time
+	Email     *string
+}
+
+// Sharing (internal/sharing): memberships, invites, ownership transfers, and
+// public links. Roles are checked by the caller; these queries only keep
+// the invariants the schema cannot (never downgrading, never touching the
+// owner row outside a transfer).
+// Members ---------------------------------------------------------------
+// ListMembers returns a site's members with their primary email (NULL for
+// an account without one): the owner, then managers, then viewers.
+func (q *Queries) ListMembers(ctx context.Context, siteID string) ([]ListMembersRow, error) {
+	rows, err := q.db.Query(ctx, listMembers, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMembersRow
+	for rows.Next() {
+		var i ListMembersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Role,
+			&i.CreatedAt,
+			&i.Email,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingInvites = `-- name: ListPendingInvites :many
+SELECT i.id, i.email, i.role, i.created_at, i.expires_at, e.email AS invited_by_email
+FROM invites i
+LEFT JOIN emails e ON e.user_id = i.invited_by AND e.is_primary
+WHERE i.site_id = $1 AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
+ORDER BY i.created_at DESC, i.id DESC
+`
+
+type ListPendingInvitesRow struct {
+	ID             uuid.UUID
+	Email          string
+	Role           string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	InvitedByEmail *string
+}
+
+// ListPendingInvites returns a site's unexpired pending invites, newest
+// first, with the inviter's primary email.
+func (q *Queries) ListPendingInvites(ctx context.Context, siteID string) ([]ListPendingInvitesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingInvites, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingInvitesRow
+	for rows.Next() {
+		var i ListPendingInvitesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.Role,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.InvitedByEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markInviteConsumed = `-- name: MarkInviteConsumed :exec
+UPDATE invites SET consumed_at = now(), consumed_by = $1 WHERE id = $2
+`
+
+type MarkInviteConsumedParams struct {
+	UserID uuid.NullUUID
+	ID     uuid.UUID
+}
+
+// MarkInviteConsumed records an invite as accepted by user_id at creation,
+// when the address's verified holder got the grant automatically.
+func (q *Queries) MarkInviteConsumed(ctx context.Context, arg MarkInviteConsumedParams) error {
+	_, err := q.db.Exec(ctx, markInviteConsumed, arg.UserID, arg.ID)
+	return err
+}
+
+const promoteOwner = `-- name: PromoteOwner :exec
+INSERT INTO memberships (site_id, user_id, role) VALUES ($1, $2, 'owner')
+ON CONFLICT (site_id, user_id) DO UPDATE SET role = 'owner', updated_at = now()
+`
+
+type PromoteOwnerParams struct {
+	SiteID string
+	UserID uuid.UUID
+}
+
+func (q *Queries) PromoteOwner(ctx context.Context, arg PromoteOwnerParams) error {
+	_, err := q.db.Exec(ctx, promoteOwner, arg.SiteID, arg.UserID)
+	return err
+}
+
+const revokeInvite = `-- name: RevokeInvite :execrows
+UPDATE invites SET revoked_at = now()
+WHERE id = $1 AND site_id = $2 AND consumed_at IS NULL AND revoked_at IS NULL
+`
+
+type RevokeInviteParams struct {
+	ID     uuid.UUID
+	SiteID string
+}
+
+func (q *Queries) RevokeInvite(ctx context.Context, arg RevokeInviteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeInvite, arg.ID, arg.SiteID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokePendingInvitesForEmail = `-- name: RevokePendingInvitesForEmail :execrows
+UPDATE invites SET revoked_at = now()
+WHERE site_id = $1 AND email = $2 AND consumed_at IS NULL AND revoked_at IS NULL
+`
+
+type RevokePendingInvitesForEmailParams struct {
+	SiteID string
+	Email  string
+}
+
+// RevokePendingInvitesForEmail retires an address's earlier pending invites
+// to a site when it is invited again.
+func (q *Queries) RevokePendingInvitesForEmail(ctx context.Context, arg RevokePendingInvitesForEmailParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokePendingInvitesForEmail, arg.SiteID, arg.Email)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokePendingTransfers = `-- name: RevokePendingTransfers :execrows
+UPDATE ownership_transfers SET revoked_at = now()
+WHERE site_id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
+`
+
+// RevokePendingTransfers cancels a site's pending transfers (a site has at
+// most one: starting a new one, canceling, or completing one retires the
+// rest).
+func (q *Queries) RevokePendingTransfers(ctx context.Context, siteID string) (int64, error) {
+	result, err := q.db.Exec(ctx, revokePendingTransfers, siteID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const rotatePublicLink = `-- name: RotatePublicLink :one
+UPDATE public_links
+SET token_hash = $1, generation = generation + 1, updated_at = now()
+WHERE site_id = $2 AND enabled
+RETURNING site_id, token_hash, enabled, generation, created_at, updated_at
+`
+
+type RotatePublicLinkParams struct {
+	TokenHash []byte
+	SiteID    string
+}
+
+// RotatePublicLink replaces an enabled link's token and bumps its
+// generation; no row when there is no enabled link.
+func (q *Queries) RotatePublicLink(ctx context.Context, arg RotatePublicLinkParams) (PublicLink, error) {
+	row := q.db.QueryRow(ctx, rotatePublicLink, arg.TokenHash, arg.SiteID)
+	var i PublicLink
+	err := row.Scan(
+		&i.SiteID,
+		&i.TokenHash,
+		&i.Enabled,
+		&i.Generation,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setMemberRole = `-- name: SetMemberRole :execrows
+UPDATE memberships SET role = $1, updated_at = now()
+WHERE site_id = $2 AND user_id = $3 AND role <> 'owner'
+`
+
+type SetMemberRoleParams struct {
+	Role   string
+	SiteID string
+	UserID uuid.UUID
+}
+
+// SetMemberRole changes a non-owner member's role; no row when the user is
+// not a member or is the owner.
+func (q *Queries) SetMemberRole(ctx context.Context, arg SetMemberRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMemberRole, arg.Role, arg.SiteID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setSiteOwner = `-- name: SetSiteOwner :execrows
+UPDATE sites SET owner_id = $1, updated_at = now() WHERE id = $2
+`
+
+type SetSiteOwnerParams struct {
+	OwnerID uuid.UUID
+	ID      string
+}
+
+func (q *Queries) SetSiteOwner(ctx context.Context, arg SetSiteOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSiteOwner, arg.OwnerID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

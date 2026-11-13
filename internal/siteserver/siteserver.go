@@ -5,6 +5,8 @@
 //     role, then issues a single-use ticket to the site host;
 //   - GET /_auth/callback on the site host redeems the ticket and sets the
 //     __Host-site cookie;
+//   - GET /_auth/share/{token} on the site host redeems the site's public
+//     link (docs/design.md#public-links) for a cookie without a user;
 //   - every other GET on the site host is authorized from that cookie
 //     against the site's current access state and streams the requested
 //     file of the current version from storage.
@@ -50,7 +52,8 @@ const (
 // Authorized reports whether a verified site cookie admits its holder to
 // the site described by a: member cookies need a role that can view, and
 // public-link cookies (no user) need the link enabled at the cookie's
-// generation. W6 extends this function rather than replacing it.
+// generation, so disabling or rotating the link (which bumps the
+// generation) refuses every earlier cookie on its next request.
 func Authorized(c token.SiteCookie, a sites.Access) bool {
 	if c.SiteID != a.SiteID {
 		return false
@@ -62,7 +65,8 @@ func Authorized(c token.SiteCookie, a sites.Access) bool {
 }
 
 // Register installs GET /auth/site on the app host and the file server,
-// /_auth/callback, and the reserved /_auth/ namespace on site hosts.
+// /_auth/callback, /_auth/share/{token}, and the reserved /_auth/ namespace
+// on site hosts.
 func Register(r *server.Routes, d *server.Deps) error {
 	h := newHandler(d)
 	r.App.HandleFunc("GET /auth/site", h.handoff)
@@ -70,6 +74,7 @@ func Register(r *server.Routes, d *server.Deps) error {
 	// Reserved on every site host; never served from site content.
 	r.Sites.HandleFunc("GET /_auth/", h.reserved)
 	r.Sites.HandleFunc("GET /_auth/callback", h.callback)
+	r.Sites.HandleFunc("GET /_auth/share/{token}", h.share)
 	return nil
 }
 
@@ -297,18 +302,47 @@ func (h *handler) callback(w http.ResponseWriter, r *http.Request) {
 	if !ValidReturnPath(ret) {
 		ret = "/"
 	}
-	exp := h.now().Add(CookieTTL)
+	h.setCookie(w, token.SiteCookie{SiteID: siteID, UserID: row.UserID})
+	http.Redirect(w, r, ret, http.StatusFound)
+}
+
+// share (site host) redeems this site's public link: it sets a site cookie
+// without a user, carrying the link's generation, and redirects to "/" so
+// the token leaves the address bar. Every failure (unknown token, another
+// site's link, a disabled link) gets the same neutral page.
+func (h *handler) share(w http.ResponseWriter, r *http.Request) {
+	siteID := server.SiteID(r.Context())
+	hdr := w.Header()
+	hdr.Set("Cache-Control", "no-store")
+	hdr.Set("Referrer-Policy", "no-referrer")
+	hdr.Set("X-Content-Type-Options", "nosniff")
+	link, err := db.New(h.deps.DB).GetPublicLinkByToken(r.Context(), token.Hash(r.PathValue("token")))
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		h.fail(w, r, err)
+		return
+	}
+	if err != nil || link.SiteID != siteID || !link.Enabled {
+		page(w, http.StatusNotFound, "This link isn’t active",
+			"It may have been turned off or replaced with a new one. Ask the person who shared it for the current link.", "")
+		return
+	}
+	h.setCookie(w, token.SiteCookie{SiteID: siteID, LinkGen: link.Generation})
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// setCookie issues the site cookie for c, expiring CookieTTL from now.
+func (h *handler) setCookie(w http.ResponseWriter, c token.SiteCookie) {
+	c.Expires = h.now().Add(CookieTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
-		Value:    h.signer.SiteCookie(token.SiteCookie{SiteID: siteID, UserID: row.UserID, Expires: exp}),
+		Value:    h.signer.SiteCookie(c),
 		Path:     "/",
-		Expires:  exp,
+		Expires:  c.Expires,
 		MaxAge:   int(CookieTTL / time.Second),
 		Secure:   true,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.Redirect(w, r, ret, http.StatusFound)
 }
 
 // reserved answers every /_auth/ path no more specific route handles.
