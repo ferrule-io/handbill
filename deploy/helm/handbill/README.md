@@ -27,6 +27,19 @@ helm install handbill ./deploy/helm/handbill \
   --set app.sitesDomain="sites.example.com"
 ```
 
+### Installing from the OCI Registry
+
+Published chart versions are hosted in the GitHub Packages OCI registry at `oci://ghcr.io/ferrule-io/charts/handbill`:
+
+```bash
+helm install handbill oci://ghcr.io/ferrule-io/charts/handbill \
+  --version <VERSION> \
+  --namespace handbill \
+  --create-namespace \
+  --set app.origin="https://dash.example.com" \
+  --set app.sitesDomain="sites.example.com"
+```
+
 ## Domain Architecture and Host Routing
 
 `handbill` multiplexes traffic based on the HTTP `Host` header:
@@ -280,6 +293,29 @@ The chart applies Kubernetes security best practices out-of-the-box:
 - **PostgreSQL Bundled Storage**: The bundled Debian-based PostgreSQL container runs as UID/GID `999` with `fsGroup: 999`. The cluster data directory is set to `PGDATA: /var/lib/postgresql/data/pgdata` (a subdirectory) to prevent `initdb` failures on volumes provisioned with a `lost+found` directory.
 - **Startup & Health Probes**: A `startupProbe` on `/healthz` provides up to 150 seconds for PostgreSQL initialization and database migrations to complete before `livenessProbe` and `readinessProbe` start checking the pod.
 - **Component Labeling & Port Forwarding**: The application Deployment and Service use `app.kubernetes.io/component: app` to ensure the application Service and port-forward commands target only handbill application pods, not the bundled PostgreSQL StatefulSet pod (`app.kubernetes.io/component: postgresql`).
+
+## Releasing
+
+Releases are driven entirely by git tags.
+
+### Tagging and Publishing
+
+To release a new version of Handbill:
+
+1. Ensure all changes and CI checks pass on `main`.
+2. Tag the release commit following semver (`vX.Y.Z`):
+   ```bash
+   git tag -a v0.1.0 -m "Release v0.1.0"
+   git push origin v0.1.0
+   ```
+3. The `.github/workflows/release.yaml` workflow triggers on tag push:
+   - **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile`, tags them as `vX.Y.Z`, `X.Y`, and `latest` (for non-prerelease tags), and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
+   - **Chart**: Synchronizes `version` and `appVersion` in `deploy/helm/handbill/Chart.yaml` to the tag version, runs `helm lint`, packages the chart, and pushes the OCI package to `oci://ghcr.io/ferrule-io/charts`.
+   - **GitHub Release**: Drafts and publishes a GitHub release with automatically generated changelog release notes and attaches the packaged `handbill-*.tgz` chart bundle.
+
+### Dry Runs
+
+Dry runs can be triggered manually via `workflow_dispatch` in GitHub Actions by selecting the `dry_run` option. A dry run verifies multi-arch container building and chart linting/packaging without pushing images or charts to registries or creating a GitHub release.
 
 ## Configuration Reference
 
