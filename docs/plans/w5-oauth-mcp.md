@@ -261,7 +261,7 @@ Both serve the same document, `200`, `Cache-Control: public, max-age=3600`:
   "resource": "https://dash.example.com/mcp",
   "authorization_servers": ["https://dash.example.com"],
   "bearer_methods_supported": ["header"],
-  "resource_name": "agent-dash"
+  "resource_name": "handbill"
 }
 ```
 
@@ -417,7 +417,7 @@ values on the existing query. Never concatenate strings.
 Content type must be `application/x-www-form-urlencoded` (parameters are ignored). The body is capped at
 16 KiB (`http.MaxBytesReader`). A parameter that appears more than once → `invalid_request`. Errors are
 `{"error": …, "error_description": …}` with status 400, except `invalid_client`, which is 401 (plus
-`WWW-Authenticate: Basic realm="agent-dash"` when the request carried an `Authorization` header).
+`WWW-Authenticate: Basic realm="handbill"` when the request carried an `Authorization` header).
 
 **Step 0, before touching any code or token: client authentication.** All our clients use `none`. If the
 request carries `Authorization`, `client_secret`, `client_assertion`, or `client_assertion_type`, answer
@@ -553,7 +553,7 @@ IP-literal hosts are not refused here; `safehttp` refuses special-use addresses 
 ### 5.2 Fetch
 
 One `*safehttp.Client` per module: `safehttp.New(safehttp.Options{Timeout: 5 * time.Second,
-MaxBodyBytes: 5 << 10, UserAgent: "agent-dash (+" + APP_ORIGIN + ")"})`. The 5 KiB cap is CIMD-03
+MaxBodyBytes: 5 << 10, UserAgent: "handbill (+" + APP_ORIGIN + ")"})`. The 5 KiB cap is CIMD-03
 §10.11's recommendation. Real documents are 350–500 bytes.
 
 Request headers: `Accept: application/json`, plus `If-None-Match` and `If-Modified-Since` when
@@ -701,7 +701,7 @@ That is why each method is registered separately.
 `NewServer`:
 
 ```go
-mcpsdk.NewServer(&mcpsdk.Implementation{Name: "agent-dash", Title: "agent-dash", Version: "0.1"},
+mcpsdk.NewServer(&mcpsdk.Implementation{Name: "handbill", Title: "handbill", Version: "0.1"},
     &mcpsdk.ServerOptions{Instructions: instructions})
 ```
 
@@ -856,7 +856,7 @@ This runs before authentication. No CORS headers are ever sent, so preflights fa
 
 ### 8.2 Server instructions (`ServerOptions.Instructions`)
 
-> agent-dash hosts static websites (HTML, CSS, JavaScript, images) that you publish for a person to view at a
+> handbill hosts static websites (HTML, CSS, JavaScript, images) that you publish for a person to view at a
 > stable, private URL; no server-side code runs. Viewers sign in to see a site, and only people the owner shares
 > it with can open it. Typical flow: list_sites (reuse an existing site to keep its URL) or create_site →
 > publish_site for small sites (under ~10 MB per call), or create_deployment → upload_files / get_upload_url →
@@ -869,7 +869,7 @@ Descriptions are the exact text agents see.
 
 #### `whoami` — any signed-in user
 
-- Description: "Show which agent-dash account this connection acts as (email and user id) and which app is
+- Description: "Show which handbill account this connection acts as (email and user id) and which app is
   connected. Call it when you need to know whose sites you are working with."
 - Input: `{}`.
 - Output: `{user_id, email, email_verified, client_id, client_name}`.
@@ -1318,10 +1318,10 @@ Claude Code sends credentials only to HTTPS token endpoints or to `localhost`, `
 ([docs](https://code.claude.com/docs/en/mcp)). So use `localhost` as the app host, not `dash.localhost`:
 
 ```sh
-APP_ORIGIN=http://localhost:8080 SITES_DOMAIN=sites.localhost go run ./cmd/agent-dash
+APP_ORIGIN=http://localhost:8080 SITES_DOMAIN=sites.localhost go run ./cmd/handbill
 # browser: http://localhost:8080/signup → create an account with a passkey
-claude mcp add --transport http agent-dash http://localhost:8080/mcp
-claude   # in the session: /mcp → agent-dash → Authenticate
+claude mcp add --transport http handbill http://localhost:8080/mcp
+claude   # in the session: /mcp → handbill → Authenticate
 ```
 
 The server fetches the CIMD document from `claude.ai` (public, so `safehttp` allows it).
@@ -1330,7 +1330,7 @@ Expect:
 
 1. The browser opens `/consent` showing **Claude Code**, host `claude.ai`, "Sends you back to:
    localhost:<port>", and the loopback warning. Allow it, and Claude Code reports connected with 15 tools.
-2. Prompt: "With agent-dash, create a site called 'Smoke test' with an index.html that says hello and links
+2. Prompt: "With handbill, create a site called 'Smoke test' with an index.html that says hello and links
    style.css, publish it, and give me the URL." Open `http://<id>.sites.localhost:8080/`. The handoff signs
    you in, and the page renders with CSS.
 3. "Change the heading to 'Hello again' using a merge publish." Reload: changed, same URL.
@@ -1338,7 +1338,7 @@ Expect:
 4. "Build a 3-page site with an image in a temp directory and publish it with get_upload_url and curl."
    Claude runs `tar`/`curl`, finalizes, and the pages and image load.
 5. `/settings/security` lists Claude Code with a recent "last used".
-   `claude mcp logout agent-dash` → the server logs `POST /oauth/revoke 200`. The next tool call
+   `claude mcp logout handbill` → the server logs `POST /oauth/revoke 200`. The next tool call
    re-prompts authentication.
 6. Re-authenticate, then **Disconnect** in settings. The next tool call fails with 401, and Claude Code
    shows the server as needing authentication.
@@ -1360,7 +1360,7 @@ host only needs to be reachable from your own browser.
    }
    ```
    Run `caddy trust` once, then `sudo caddy run`.
-3. `APP_ORIGIN=https://<random>.trycloudflare.com SITES_DOMAIN=sites.localhost go run ./cmd/agent-dash`.
+3. `APP_ORIGIN=https://<random>.trycloudflare.com SITES_DOMAIN=sites.localhost go run ./cmd/handbill`.
    Check that the tunnel forwards the public `Host`:
    `curl -s https://<random>.trycloudflare.com/.well-known/oauth-protected-resource/mcp` must show
    `"resource":"https://<random>.trycloudflare.com/mcp"`. If it 404s, the tunnel rewrote `Host`; set it
@@ -1390,17 +1390,17 @@ Commits in this order. Each step builds and passes its tests.
    `redirect.go` and `pkce.go` with unit tests, then `cimd.go` (URL rules, fetch, validation, caching) with
    the fake-host tests.
 4. **Authorize and consent**: `metadata.go`, `authorize.go`, `consent.go` (both `/app-api/oauth/consent`
-   endpoints), `grants.go`, `routes.go` (`Module`, `Register`), and `cmd/agent-dash/module_oauth.go`.
+   endpoints), `grants.go`, `routes.go` (`Module`, `Register`), and `cmd/handbill/module_oauth.go`.
 5. **Token**: `token.go`, `revoke.go`, `register.go`, and their tests.
 6. **Bearer**: `bearer.go` (`Principal`, `RequireBearer`, `PrincipalFrom`, `WithPrincipal`).
 7. **`internal/upload`**: `routes.go` and `upload.go` (`GrantTTL`, `URL`, the handler), tests, and
-   `cmd/agent-dash/module_upload.go`.
+   `cmd/handbill/module_upload.go`.
 8. **`internal/mcp`**:
    - `server.go` (`Env`, `toolsets`, `NewServer`, instructions), `schema.go`, `access.go`, `origin.go`,
      `routes.go`;
    - `tools_account.go`, `tools_sites.go`, `tools_publish.go`, `tools_content.go`;
    - `tools_test.go`, `e2e_test.go`;
-   - `cmd/agent-dash/module_mcp.go`.
+   - `cmd/handbill/module_mcp.go`.
 9. **Web**:
    - `web/app/consent/page.tsx`;
    - `web/components/consent/{consent-card.tsx,consent-error.tsx,data.ts}` (API types and calls);
@@ -1425,7 +1425,7 @@ internal/mcp/       server.go schema.go access.go origin.go routes.go
                     tools_account.go tools_sites.go tools_publish.go tools_content.go *_test.go
 internal/upload/    routes.go upload.go upload_test.go export_test.go
 internal/db/        migrations/<ts>_oauth_requests.sql queries/oauth.sql queries/mcp.sql (+ generated)
-cmd/agent-dash/     module_oauth.go module_mcp.go module_upload.go
+cmd/handbill/     module_oauth.go module_mcp.go module_upload.go
 web/app/consent/page.tsx
 web/components/consent/   consent-card.tsx consent-error.tsx data.ts
 web/components/settings/oauth-grants.tsx

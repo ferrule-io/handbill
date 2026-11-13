@@ -1,4 +1,4 @@
-# agent-dash — Intent
+# Handbill — Intent
 
 ## Problem
 
@@ -45,11 +45,10 @@ some access control, without the publisher keeping anything running.
 ## Decisions
 
 - **Name**: the product is **Handbill** — a printed notice handed out and then
-  thrown away, like the throwaway sites it hosts. "agent-dash" is the working
-  name until the code, image, and chart are renamed. Rejected: agent-dash (not
-  a dashboard; viewers don't care about agents), Hatch (PyPA's build tool),
-  Placard (reads as public signage), Pigeonhole/Pigeonpost/Loft, and
-  Ostrakon/Palimpsest/Tabella/Diurna.
+  thrown away, like the throwaway sites it hosts.
+  Rejected: agent-dash (not a dashboard; viewers don't care about agents),
+  Hatch (PyPA's build tool), Placard (reads as public signage),
+  Pigeonhole/Pigeonpost/Loft, and Ostrakon/Palimpsest/Tabella/Diurna.
 - **Access control**: user accounts with per-site RBAC. Sharing means granting
   another user a role on a site. (Supersedes the earlier token/URL-only model.)
 - **Accounts**: identified by email. No passwords — sign-in is passkey or SSO.

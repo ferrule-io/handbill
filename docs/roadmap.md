@@ -1,4 +1,4 @@
-# agent-dash — Roadmap
+# handbill — Roadmap
 
 Each step ends in something runnable and has an explicit done-when. Design
 references are to [design.md](design.md).
@@ -21,7 +21,7 @@ where the product is useful (an agent publishes; the owner views).
 
 ## 1. Scaffold
 
-- Go module, `cmd/agent-dash`, `internal/` packages, config from environment
+- Go module, `cmd/handbill`, `internal/` packages, config from environment
   (`APP_ORIGIN`, `SITES_DOMAIN`, `SECRET_KEY`, `DATABASE_URL`, storage, SMTP,
   Google, `OAUTH_DCR_ENABLED`, `INVITE_TTL`).
 - Host-based routing: app host vs `<id>.SITES_DOMAIN`; `/healthz`, `/readyz`.

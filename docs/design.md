@@ -1,4 +1,4 @@
-# agent-dash — Design
+# handbill — Design
 
 Decisions here implement [INTENT.md](../INTENT.md).
 
@@ -11,7 +11,7 @@ flowchart LR
   agent[MCP client] -->|OAuth bearer| mcp["/mcp"]
   browser[Browser] --> app["dash.example.com<br/>app UI + auth + OAuth"]
   browser --> sites["*.sites.example.com<br/>site file server"]
-  subgraph bin[agent-dash binary]
+  subgraph bin[handbill binary]
     mcp
     app
     sites
@@ -85,10 +85,10 @@ reserved `/_auth/` is site content, including `/healthz` and `/readyz`.
 
 | Path | Contents |
 |---|---|
-| `cmd/agent-dash/` | Server entrypoint |
+| `cmd/handbill/` | Server entrypoint |
 | `internal/` | Go packages (http, auth, oauth, mcp, sites, storage, db) |
 | `web/` | Next.js app |
-| `deploy/helm/agent-dash/` | Helm chart |
+| `deploy/helm/handbill/` | Helm chart |
 | `Dockerfile` | Multi-stage: build `web/`, build Go with embedded assets, distroless runtime |
 
 ## Origins and URLs
@@ -376,7 +376,7 @@ the one-shot form of the same pipeline.
   `authorization_response_iss_parameter_supported: true`, and refresh tokens
   rotated on every use. CIMD per draft-ietf-oauth-client-id-metadata-document-03.
   PKCE (S256) is required, and resource indicators bind tokens to
-  `APP_ORIGIN/mcp`. agent-dash defines no scopes (`offline_access` is accepted
+  `APP_ORIGIN/mcp`. handbill defines no scopes (`offline_access` is accepted
   and recorded, with no effect).
 - Client registration via Client ID Metadata Documents (CIMD): the
   `client_id` is an HTTPS URL to the client's metadata JSON.
@@ -478,7 +478,7 @@ sets exactly these.
 | `SMTP_HOST` | empty | Mail server; notifications are disabled when empty |
 | `SMTP_PORT` | by `SMTP_TLS`: 587, 465, 25 | Mail server port |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | empty | Set both or neither |
-| `SMTP_FROM` | required with `SMTP_HOST` | Sender, e.g. `agent-dash <dash@example.com>` |
+| `SMTP_FROM` | required with `SMTP_HOST` | Sender, e.g. `handbill <dash@example.com>` |
 | `SMTP_TLS` | `starttls` | `starttls`, `tls` (implicit TLS), or `none` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | empty | Google sign-in; set both or neither (disabled when unset) |
 | `OAUTH_DCR_ENABLED` | `false` | Serve `/oauth/register` (Dynamic Client Registration) |

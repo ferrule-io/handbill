@@ -1,4 +1,4 @@
-# agent-dash — Workplan
+# handbill — Workplan
 
 How the [roadmap](roadmap.md) is split into parallel workstreams, what each
 one owns, and the Go interfaces at their boundaries. Workers code against
@@ -51,18 +51,18 @@ func Register(r *server.Routes, d *server.Deps) error {
 }
 ```
 
-and adds itself to the server from its **own** file in `cmd/agent-dash/`:
+and adds itself to the server from its **own** file in `cmd/handbill/`:
 
 ```go
-// cmd/agent-dash/module_<feature>.go
+// cmd/handbill/module_<feature>.go
 package main
 
-import "github.com/mjquinlan2000/agent-dash/internal/<feature>"
+import "github.com/ferrule-io/handbill/internal/<feature>"
 
 func init() { modules = append(modules, <feature>.Register) }
 ```
 
-- Never edit `internal/server/server.go`, `cmd/agent-dash/modules.go`, or
+- Never edit `internal/server/server.go`, `cmd/handbill/modules.go`, or
   another workstream's `module_*.go`.
 - Patterns are Go `ServeMux` patterns with methods (`"POST /oauth/token"`).
   The most specific pattern wins regardless of registration order; conflicts
@@ -145,12 +145,12 @@ for relative paths starting with a single `/`.
 Expect small, mechanical merges in: `go.mod`/`go.sum`,
 `web/package.json`/`web/pnpm-lock.yaml`, `compose.yaml`,
 `.github/workflows/ci.yaml`, `docs/design.md`, and the one storage line in
-`cmd/agent-dash/main.go` (W2b only). Keep those edits minimal and separate
+`cmd/handbill/main.go` (W2b only). Keep those edits minimal and separate
 from feature commits.
 
 ## W1 Scaffold — done
 
-Owns: `cmd/agent-dash/` (`main.go`, `modules.go`, `module_webui.go`),
+Owns: `cmd/handbill/` (`main.go`, `modules.go`, `module_webui.go`),
 `internal/config`, `internal/server`, `internal/siteid`,
 `internal/identity`, `internal/webui`, `internal/storage/storage.go`
 (interface), `internal/db/db.go` (`Open`), `web/` scaffold and design system
@@ -169,7 +169,7 @@ the spec in the same change.
 
 ## W8 Helm chart
 
-Owns: `deploy/helm/agent-dash/` and its install docs. Consumes the
+Owns: `deploy/helm/handbill/` and its install docs. Consumes the
 configuration and runtime contract in design.md#configuration (env vars,
 port 8080, UID/GID 65532, `/data`, probes on any `Host`). `publish_site`
 bodies (up to 16 MiB) and archive uploads (up to 512 MiB) exceed common
@@ -297,7 +297,7 @@ and re-apply.
 
 Owns: `internal/storage/` (interface exists; adds `Open`, `ValidKey`,
 `local/`, `s3store/`, `gcsstore/`, `storagetest/`), the `deps.Storage`
-line in `cmd/agent-dash/main.go`, MinIO and fake-gcs-server services in
+line in `cmd/handbill/main.go`, MinIO and fake-gcs-server services in
 `compose.yaml` (profile `storage`) and CI.
 
 Interface (exists in `internal/storage/storage.go`):
@@ -366,7 +366,7 @@ func NewError(status int, code, message string) *Error // added
 func WriteJSON(w http.ResponseWriter, status int, v any)
 func ReadJSON(r *http.Request, v any) error // ≤ MaxBodyBytes (1 MiB), application/json, unknown fields rejected
 // Added: the CSRF token for this browser (sets __Host-csrf when absent),
-// and the module that claims /app-api/ (cmd/agent-dash/module_appapi.go).
+// and the module that claims /app-api/ (cmd/handbill/module_appapi.go).
 func CSRFToken(w http.ResponseWriter, r *http.Request, d *server.Deps) string
 func Register(r *server.Routes, d *server.Deps) error
 ```
@@ -669,7 +669,7 @@ MCP tools map one-to-one: `list_members` → `Members`, `share_site` →
 site row, serializing membership changes per site. Behavior decided here is
 in design.md (Sharing, Roles, Public links).
 
-- App API (`sharing.Register`, `cmd/agent-dash/module_sharing.go`):
+- App API (`sharing.Register`, `cmd/handbill/module_sharing.go`):
   `GET|POST /app-api/sites/{id}/members`, `PATCH|DELETE
   /app-api/sites/{id}/members/{member}` (member user id or invite id),
   `GET|POST /app-api/sites/{id}/public-link` (`{op}`), `GET|POST|DELETE
