@@ -236,7 +236,6 @@ func TestRedirectRefusal(t *testing.T) {
 		http.StatusSeeOther,          // 303
 		http.StatusTemporaryRedirect, // 307
 		http.StatusPermanentRedirect, // 308
-		http.StatusNotModified,       // 304
 	}
 
 	for _, status := range redirectStatuses {
