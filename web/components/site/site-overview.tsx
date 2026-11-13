@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { api, ApiError } from "@/lib/api"
+import { api, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 /** Address, live version, and dates; with the details form while editing. */
@@ -121,7 +121,7 @@ function EditDetails({ site, onDone }: { site: Site; onDone: (saved: boolean) =>
       toast.success("Details saved")
       onDone(true)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not save.")
+      setError(errorMessage(err))
       setSaving(false)
     }
   }

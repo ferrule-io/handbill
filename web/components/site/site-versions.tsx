@@ -28,7 +28,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, ApiError } from "@/lib/api"
+import { api, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 /** Version history with rollback, for managers and the owner. */
@@ -169,7 +169,7 @@ function RollbackButton({
       setOpen(false)
       onRollback()
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Rollback failed.")
+      toast.error(errorMessage(err))
     } finally {
       setBusy(false)
     }
