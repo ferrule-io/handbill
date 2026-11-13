@@ -118,6 +118,20 @@ type OauthAuthorizationCode struct {
 	ConsumedAt          *time.Time
 }
 
+type OauthAuthorizationRequest struct {
+	ID            uuid.UUID
+	TokenHash     []byte
+	UserID        uuid.UUID
+	ClientID      uuid.UUID
+	RedirectUri   string
+	State         *string
+	CodeChallenge string
+	Resource      string
+	Scopes        []string
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+}
+
 type OauthClient struct {
 	ID                      uuid.UUID
 	ClientID                string
