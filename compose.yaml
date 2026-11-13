@@ -2,7 +2,7 @@
 # (`make run`); see mise.toml for the matching environment.
 services:
   postgres:
-    image: postgres:18
+    image: postgres:17
     environment:
       POSTGRES_USER: agentdash
       POSTGRES_PASSWORD: agentdash
@@ -17,5 +17,24 @@ services:
       timeout: 3s
       retries: 30
 
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    profiles:
+      - storage
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+  fake-gcs:
+    image: fsouza/fake-gcs-server:latest
+    profiles:
+      - storage
+    command: -scheme http -port 4443 -public-host 127.0.0.1:4443 -external-url http://127.0.0.1:4443
+    ports:
+      - "127.0.0.1:4443:4443"
 volumes:
   postgres:

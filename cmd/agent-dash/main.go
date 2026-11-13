@@ -17,6 +17,7 @@ import (
 	"github.com/mjquinlan2000/agent-dash/internal/config"
 	"github.com/mjquinlan2000/agent-dash/internal/db"
 	"github.com/mjquinlan2000/agent-dash/internal/server"
+	"github.com/mjquinlan2000/agent-dash/internal/storage"
 )
 
 func main() {
@@ -42,7 +43,11 @@ func run(log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	deps := &server.Deps{Config: cfg, Logger: log, DB: pool}
+	store, err := storage.Open(ctx, cfg.Storage)
+	if err != nil {
+		return err
+	}
+	deps := &server.Deps{Config: cfg, Logger: log, DB: pool, Storage: store}
 	handler, err := server.New(deps, modules...)
 	if err != nil {
 		return err

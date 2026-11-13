@@ -16,6 +16,22 @@ jobs:
   go:
     name: Go vet and test
     runs-on: ubuntu-latest
+    services:
+      minio:
+        image: cgr.dev/chainguard/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          server /data
+      fake-gcs:
+        image: fsouza/fake-gcs-server:latest
+        ports:
+          - 4443:4443
+        options: >-
+          -scheme http -port 4443 -public-host 127.0.0.1:4443 -external-url http://127.0.0.1:4443
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -25,6 +41,11 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
       - run: go test -race ./...
+        env:
+          TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          TEST_GCS_EMULATOR_HOST: 127.0.0.1:4443
 
   web:
     name: Frontend lint, typecheck, build

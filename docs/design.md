@@ -283,8 +283,25 @@ atomic: viewers see either the old version or the new one.
 
 ## Storage
 
-One adapter interface with S3, GCS, and local filesystem implementations.
-Versions are stored as immutable file sets keyed by site id and version id.
+One adapter interface (`Store`) with `local`, `s3`, and `gcs` implementations.
+
+Blobs are content-addressed and immutable:
+`sites/<site-id>/blobs/<sha256-hex>`
+
+Versions and deployments do not duplicate blobs; their file lists (path, blob
+SHA-256, size, content type) are maintained in PostgreSQL (`version_files` and
+`deployment_files`). Deleting a site deletes the entire storage prefix
+`sites/<site-id>/` via `DeletePrefix`.
+
+- `local`: Atomic writes via same-directory temp files, fsync, and rename.
+  Content type stored in a `.meta` sidecar JSON. Enforces strict root isolation
+  without following symlinks outside root via Go's `os.OpenRoot`.
+- `s3`: Standard AWS SDK v2 client supporting AWS S3 and S3-compatible endpoints
+  (e.g. MinIO). Handles pagination and batch deletions of up to 1000 objects.
+- `gcs`: Google Cloud Storage client supporting Application Default Credentials
+  and `STORAGE_EMULATOR_HOST` for testing.
+- Key validation: all keys must be relative paths with no empty, `.`, or `..`
+  segments, no backslashes, no leading slash, and no NUL bytes.
 
 ## Configuration
 

@@ -249,7 +249,7 @@ content-addressed blobs (below), so the schema has
 Done when: migrations apply on a fresh database; `dbtest` and `token` have
 unit tests.
 
-## W2b Storage adapters
+## W2b Storage adapters — done
 
 Owns: `internal/storage/` (interface exists; adds `Open`, `ValidKey`,
 `local/`, `s3store/`, `gcsstore/`, `storagetest/`), the `deps.Storage`
