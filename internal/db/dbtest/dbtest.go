@@ -27,7 +27,7 @@ func Pool(t *testing.T) *pgxpool.Pool {
 		if os.Getenv("CI") != "" {
 			t.Fatal("dbtest: TEST_DATABASE_URL must be set in CI")
 		}
-		t.Skip("dbtest: TEST_DATABASE_URL is unset (e.g. postgres://handbill:handbill@localhost:55432/handbill?sslmode=disable after `make db-up`)")
+		t.Skip("dbtest: TEST_DATABASE_URL is unset (e.g. postgres://handbill:handbill@localhost:55433/handbill?sslmode=disable, compose's postgres-test, after `make db-up`)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

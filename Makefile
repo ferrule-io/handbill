@@ -46,7 +46,10 @@ web-typecheck:
 
 lint: vet web-lint web-typecheck
 
-## e2e: routing acceptance check against a running server (BASE_URL)
+## e2e: Playwright acceptance suite against a running server (BASE_URL). Run it
+## with the server's DATABASE_URL and STORAGE_* exported; the global setup
+## refuses a DATABASE_URL on TEST_DATABASE_URL's instance (Go tests churn it)
+## and checks the seeders reach the server's database and storage.
 e2e:
 	cd web && pnpm test:e2e
 

@@ -395,6 +395,15 @@ func TestCSRFAndOrigin(t *testing.T) {
 		}
 		return b.raw("POST", "/app-api/auth/sessions/revoke-others", strings.NewReader(body), hdr)
 	}
+	// A token that differs from the real one in its first character. Always
+	// substituting "x" left the token unchanged whenever it already began
+	// with "x" (1 run in 64), and the valid request then succeeded.
+	wrong := []byte(b.csrf)
+	if wrong[0] == 'A' {
+		wrong[0] = 'B'
+	} else {
+		wrong[0] = 'A'
+	}
 	for _, tc := range []struct {
 		name, origin, token, code string
 	}{
@@ -403,7 +412,7 @@ func TestCSRFAndOrigin(t *testing.T) {
 		{"same-site site host", "http://abc.sites.localhost:8083", b.csrf, "bad_origin"},
 		{"real site host", "http://abcdefghijkl.sites.localhost:8083", b.csrf, "bad_origin"},
 		{"missing token", testOrigin, "", "bad_csrf"},
-		{"wrong token", testOrigin, "x" + b.csrf[1:], "bad_csrf"},
+		{"wrong token", testOrigin, string(wrong), "bad_csrf"},
 	} {
 		if res := post(tc.origin, tc.token); res.status != 403 || res.errorCode(t) != tc.code {
 			t.Fatalf("%s: %d %s", tc.name, res.status, res.body)

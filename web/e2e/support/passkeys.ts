@@ -43,6 +43,16 @@ export function uniqueEmail(prefix = "e2e"): string {
 }
 
 /**
+ * Expectation options for steps the server answers only after argon2id
+ * work: issuing recovery codes hashes ten of them (the codes page after
+ * sign-up), and a recovery-code sign-in verifies up to ten. That takes well
+ * under a second on an idle machine but several seconds on a loaded one (a
+ * parallel `go test -race`), past Playwright's 5 s default. Only these steps
+ * get the longer wait; everything else keeps the default.
+ */
+export const argon2Step = { timeout: 30_000 }
+
+/**
  * Signs up through the UI with a passkey from a virtual authenticator,
  * saves the recovery codes, and lands signed in. Returns the codes.
  */
@@ -52,7 +62,7 @@ export async function signUp(page: Page, email: string): Promise<string[]> {
   await page.getByRole("button", { name: "Create with passkey" }).click()
   await expect(page).toHaveURL(/\/signup\/codes/)
   const codes = page.getByTestId("recovery-code")
-  await expect(codes).toHaveCount(10)
+  await expect(codes).toHaveCount(10, argon2Step)
   const values = await codes.allTextContents()
   await page.getByLabel(/saved my recovery codes/).check()
   await page.getByRole("button", { name: "Continue to Handbill" }).click()

@@ -82,6 +82,12 @@ EOF
   # Ensure image is present in kind cluster
   log "Loading ${IMAGE_NAME} into kind cluster..."
   $KIND load docker-image "${IMAGE_NAME}" --name "${CLUSTER_NAME}"
+
+  # The bundled PostgreSQL and case (b) run postgres:17. Pull it on the node
+  # now so the 120 s rollout waits below never include a registry pull (on a
+  # fresh cluster the pull alone took 70 s and the first rollout timed out).
+  log "Pulling postgres:17 on the kind node..."
+  docker exec "${CLUSTER_NAME}-control-plane" crictl pull docker.io/library/postgres:17 >/dev/null
 }
 
 # Verify endpoints over port-forward
@@ -380,10 +386,12 @@ if ! $KUBECTL get ns ingress-nginx >/dev/null 2>&1; then
   $KUBECTL apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 fi
 log "Waiting for ingress-nginx controller readiness..."
+# A first install pulls the controller image and waits for the admission
+# certificate job; that alone took over 2 minutes on a fresh cluster.
 $KUBECTL wait --namespace ingress-nginx \
   --for=condition=ready pod \
   --selector=app.kubernetes.io/component=controller \
-  --timeout=120s
+  --timeout=300s
 
 $HELM install smoke-ing "$CHART_DIR" \
   --namespace "$NS_ING" \
@@ -394,7 +402,9 @@ $HELM install smoke-ing "$CHART_DIR" \
   --set app.origin="http://${APP_HOST}" \
   --set app.sitesDomain="${SITES_DOMAIN}" \
   --set ingress.enabled=true \
-  --set ingress.className=nginx
+  --set ingress.className=nginx \
+  --set metrics.enabled=true \
+  --set 'rateLimit.trustedProxies={10.244.0.0/16}'
 
 log "Waiting for rollout in ${NS_ING}..."
 $KUBECTL -n "$NS_ING" rollout status statefulset smoke-ing-handbill-postgresql --timeout=120s
@@ -435,6 +445,87 @@ if [ "$ing_site_code" = "302" ] || [ "$ing_site_code" = "404" ]; then
 else
   fail "${NS_ING}: Ingress curl wildcard route expected 302/404 for ${SITE_HOST}, got ${ing_site_code}"
 fi
+
+# Case (f): operations — metrics on its own Service only, rate limits
+# through the ingress, version, drain settings, graceful shutdown.
+log "Running Case (f): metrics, rate limits, version, graceful shutdown..."
+
+# 5. /metrics is never served on the public host.
+ing_metrics_code=$(curl -s -o /dev/null -w "%{http_code}" --resolve "${APP_HOST}:80:127.0.0.1" "http://${APP_HOST}/metrics")
+if [ "$ing_metrics_code" = "404" ]; then
+  pass "${NS_ING}: /metrics is not exposed through the ingress (404)"
+else
+  fail "${NS_ING}: /metrics through the ingress expected 404, got ${ing_metrics_code}"
+fi
+
+# 6. The metrics Service serves Prometheus metrics.
+$KUBECTL -n "$NS_ING" port-forward svc/smoke-ing-handbill-metrics 19090:9090 >/dev/null 2>&1 &
+mpf_pid=$!
+metrics_body=""
+for _ in $(seq 1 30); do
+  metrics_body=$(curl -s "http://127.0.0.1:19090/metrics" || true)
+  [ -n "$metrics_body" ] && break
+  sleep 0.5
+done
+kill "$mpf_pid" 2>/dev/null || true
+wait "$mpf_pid" 2>/dev/null || true
+if grep -q '^handbill_http_requests_total{' <<<"$metrics_body" && grep -q '^handbill_db_pool_max_connections' <<<"$metrics_body"; then
+  pass "${NS_ING}: metrics Service serves handbill_http_requests_total and pool stats"
+else
+  fail "${NS_ING}: metrics Service did not serve handbill metrics"
+fi
+
+# 7. Rate limits apply through the ingress: /oauth/register allows a burst
+#    of 10 per client, then answers 429 with Retry-After.
+rl_codes=""
+for _ in $(seq 1 12); do
+  rl_codes="$rl_codes $(curl -s -o /dev/null -w "%{http_code}" --resolve "${APP_HOST}:80:127.0.0.1" \
+    -X POST -H 'Content-Type: application/json' -d '{}' "http://${APP_HOST}/oauth/register")"
+done
+rl_retry=$(curl -s -o /dev/null -D - --resolve "${APP_HOST}:80:127.0.0.1" -X POST -d '{}' "http://${APP_HOST}/oauth/register" | tr -d '\r' | awk -F': ' 'tolower($1)=="retry-after"{print $2}')
+if [[ "$rl_codes" == *429* ]] && [ -n "$rl_retry" ]; then
+  pass "${NS_ING}: /oauth/register rate limited through the ingress (Retry-After: ${rl_retry})"
+else
+  fail "${NS_ING}: /oauth/register never answered 429 with Retry-After:${rl_codes}"
+fi
+
+# 8. Configuration reaches the pod: limits, metrics address, drain settings.
+ING_POD=$($KUBECTL -n "$NS_ING" get pod -l app.kubernetes.io/instance=smoke-ing,app.kubernetes.io/component=app -o jsonpath='{.items[0].metadata.name}')
+pod_env=$($KUBECTL -n "$NS_ING" get pod "$ING_POD" -o jsonpath='{range .spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
+pod_prestop=$($KUBECTL -n "$NS_ING" get pod "$ING_POD" -o jsonpath='{.spec.containers[0].lifecycle.preStop.sleep.seconds}')
+pod_grace=$($KUBECTL -n "$NS_ING" get pod "$ING_POD" -o jsonpath='{.spec.terminationGracePeriodSeconds}')
+if grep -qx 'MAX_FILE_SIZE=64MiB' <<<"$pod_env" && grep -qx 'METRICS_ADDR=:9090' <<<"$pod_env" \
+  && grep -qx 'TRUSTED_PROXIES=10.244.0.0/16' <<<"$pod_env" && [ "$pod_prestop" = "5" ] && [ "$pod_grace" = "40" ]; then
+  pass "${NS_ING}: pod has the limit, metrics, proxy, preStop (5s), and grace period (40s) settings"
+else
+  fail "${NS_ING}: pod settings wrong (preStop='${pod_prestop}', grace='${pod_grace}')"
+fi
+
+# 9. The image reports the version it was built with.
+pod_version=$($KUBECTL -n "$NS_ING" exec "$ING_POD" -- /handbill --version 2>&1 || true)
+if [[ "$pod_version" == handbill\ * ]] && [[ "$pod_version" != *"(unknown)"* ]]; then
+  pass "${NS_ING}: /handbill --version: ${pod_version}"
+else
+  fail "${NS_ING}: /handbill --version gave '${pod_version}'"
+fi
+
+# 10. SIGTERM drains: the pod logs the shutdown and exits within its grace.
+drain_log=$(mktemp)
+$KUBECTL -n "$NS_ING" logs -f "$ING_POD" >"$drain_log" 2>&1 &
+log_pid=$!
+sleep 1
+drain_start=$(date +%s)
+$KUBECTL -n "$NS_ING" delete pod "$ING_POD" --wait=true --timeout=60s >/dev/null
+drain_secs=$(( $(date +%s) - drain_start ))
+kill "$log_pid" 2>/dev/null || true
+wait "$log_pid" 2>/dev/null || true
+if grep -q '"msg":"shutting down"' "$drain_log" && [ "$drain_secs" -lt 40 ]; then
+  pass "${NS_ING}: pod shut down gracefully on SIGTERM in ${drain_secs}s"
+else
+  fail "${NS_ING}: no graceful shutdown seen (took ${drain_secs}s)"
+fi
+rm -f "$drain_log"
+$KUBECTL -n "$NS_ING" rollout status deployment smoke-ing-handbill --timeout=120s
 
 cleanup_namespace "$NS_ING"
 

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { signOut, signUp, uniqueEmail, VirtualAuthenticator } from "./support/passkeys"
+import { argon2Step, signOut, signUp, uniqueEmail, VirtualAuthenticator } from "./support/passkeys"
 
 // Accounts acceptance check (docs/roadmap.md step 3) against the real Go
 // binary, with a CDP virtual authenticator standing in for Touch ID.
@@ -45,7 +45,7 @@ test("passkey sign-up, usernameless sign-in, and recovery with a code", async ({
   await page.getByLabel("Email").fill(email)
   await page.getByLabel("Recovery code").fill(codes[0].toLowerCase())
   await page.getByRole("button", { name: "Continue" }).click()
-  await expect(page.getByRole("heading", { name: "Now, a new passkey" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Now, a new passkey" })).toBeVisible(argon2Step)
 
   // The recovery session can't reach the app until the passkey exists.
   const blocked = await page.evaluate(async () => (await fetch("/app-api/auth/security")).status)
@@ -63,7 +63,7 @@ test("passkey sign-up, usernameless sign-in, and recovery with a code", async ({
   await page.getByLabel("Email").fill(email)
   await page.getByLabel("Recovery code").fill(codes[0])
   await page.getByRole("button", { name: "Continue" }).click()
-  await expect(page.getByText(/recovery code don't match/)).toBeVisible()
+  await expect(page.getByText(/recovery code don't match/)).toBeVisible(argon2Step)
   await page.goto("/login")
   await page.getByRole("button", { name: "Sign in with passkey" }).click()
   await expect(page.getByTestId("account-menu")).toBeVisible()
@@ -78,7 +78,7 @@ test("signed-out visitors are sent to sign in and come back", async ({ page }) =
   await expect(page).toHaveURL("/signup?return=%2Fsettings%2Fsecurity")
   await page.getByLabel("Email").fill(uniqueEmail("return"))
   await page.getByRole("button", { name: "Create with passkey" }).click()
-  await expect(page.getByTestId("recovery-code")).toHaveCount(10)
+  await expect(page.getByTestId("recovery-code")).toHaveCount(10, argon2Step)
   await page.getByLabel(/saved my recovery codes/).check()
   await page.getByRole("button", { name: "Continue to Handbill" }).click()
   await expect(page).toHaveURL("/settings/security")

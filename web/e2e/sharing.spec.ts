@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 
-import { VirtualAuthenticator } from "./support/passkeys"
+import { argon2Step, VirtualAuthenticator } from "./support/passkeys"
 import { seed, signIn, siteOrigin, uniqueEmail } from "./support/seed"
 
 // Sharing end to end (docs/roadmap.md step 6): invites that bind to the
@@ -85,6 +85,7 @@ test("an invite link signs a new person up and lands them on the site", async ({
   await guest.getByLabel("Email").fill(invitee)
   await guest.getByRole("button", { name: "Create with passkey" }).click()
   await expect(guest).toHaveURL(/\/signup\/codes/)
+  await expect(guest.getByTestId("recovery-code")).toHaveCount(10, argon2Step)
   await guest.getByLabel(/saved my recovery codes/).check()
   await guest.getByRole("button", { name: "Continue to Handbill" }).click()
 

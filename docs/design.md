@@ -642,6 +642,9 @@ Runtime contract:
 Local development (`mise.toml` `[env]`, `compose.yaml`): the app runs on
 `http://dash.localhost:8080`, sites on `http://<id>.sites.localhost:8080`
 (browsers resolve `*.localhost` to loopback), and PostgreSQL on host port 55432.
+Go tests create and drop their databases on a separate instance
+(`postgres-test`, port 55433, no durability); the Playwright global setup
+refuses to run when the server's database and the tests' share an instance.
 
 ## Operations
 

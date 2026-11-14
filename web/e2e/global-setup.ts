@@ -15,6 +15,7 @@ import { binDirEnv, buildSeeders } from "./support/seeders"
  * fail in confusing ways.
  */
 export default async function globalSetup(config: FullConfig) {
+  refuseTestDatabase()
   const dir = mkdtempSync(path.join(os.tmpdir(), "handbill-e2e-"))
   process.env[binDirEnv] = dir // inherited by the workers
   buildSeeders(dir)
@@ -47,4 +48,25 @@ export default async function globalSetup(config: FullConfig) {
     )
   }
   return () => rmSync(dir, { recursive: true, force: true })
+}
+
+/**
+ * Go tests (TEST_DATABASE_URL) create, migrate, and drop a database per
+ * test; a server under test on the same PostgreSQL instance slows down by
+ * seconds while they run. Refuse to start rather than flake.
+ */
+function refuseTestDatabase() {
+  const { DATABASE_URL: server, TEST_DATABASE_URL: tests } = process.env
+  if (!server || !tests) return
+  const where = (u: string) => {
+    const p = new URL(u)
+    const host = p.hostname === "localhost" ? "127.0.0.1" : p.hostname
+    return `${host}:${p.port || "5432"}`
+  }
+  if (where(server) === where(tests)) {
+    throw new Error(
+      `DATABASE_URL and TEST_DATABASE_URL point at the same PostgreSQL (${where(server)}). ` +
+        "Run the server under test on the dev instance (compose `postgres`, port 55432) and Go tests on `postgres-test` (55433)."
+    )
+  }
 }
