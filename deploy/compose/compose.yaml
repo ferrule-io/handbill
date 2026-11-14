@@ -1,0 +1,60 @@
+# Handbill on one machine: the server plus PostgreSQL, with sites stored on a
+# local volume. Copy .env.example to .env, fill it in, then `docker compose up -d`.
+#
+# Out of the box this runs at http://dash.localhost:8080 for trying Handbill
+# on your own machine. For a real deployment, set APP_ORIGIN and SITES_DOMAIN
+# to your domains and put a TLS-terminating reverse proxy in front: see
+# docs/self-hosting.md.
+name: handbill-selfhosted
+
+services:
+  handbill:
+    image: ghcr.io/ferrule-io/handbill:${HANDBILL_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${HANDBILL_BIND:-127.0.0.1:8080}:8080"
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:-http://dash.localhost:8080}
+      SITES_DOMAIN: ${SITES_DOMAIN:-sites.localhost}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (openssl rand -hex 32)}
+      DATABASE_URL: postgres://handbill:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/handbill?sslmode=disable
+      STORAGE_TYPE: local
+      STORAGE_LOCAL_DIR: /data
+      # Optional settings: empty means "use the default" or "feature off".
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS: ${SMTP_TLS:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      OAUTH_DCR_ENABLED: ${OAUTH_DCR_ENABLED:-}
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-}
+      MAX_SITE_SIZE: ${MAX_SITE_SIZE:-}
+      MAX_ARCHIVE_SIZE: ${MAX_ARCHIVE_SIZE:-}
+    volumes:
+      - sites:/data
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: handbill
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: handbill
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U handbill -d handbill"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  db:
+  sites:
