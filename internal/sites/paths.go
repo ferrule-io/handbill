@@ -4,15 +4,19 @@ import (
 	"mime"
 	"path"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
 // CleanPath validates a site file path and returns its canonical form.
 // Paths are relative, slash-separated, and case-sensitive. Leading "./"
 // segments are dropped; absolute paths, "." and ".." segments, empty
-// segments (including a trailing slash), backslashes, NUL and other control
-// characters, invalid UTF-8, and the reserved top-level "_auth" directory
-// (docs/design.md#origins-and-urls) are rejected with an *InputError.
+// segments (including a trailing slash), backslashes, NUL and other C0 and
+// C1 control characters, invisible format characters (Unicode Cf: bidi
+// overrides and isolates, zero-width characters, the BOM) that make a path
+// display as another, invalid UTF-8, and the reserved top-level "_auth"
+// directory (docs/design.md#origins-and-urls) are rejected with an
+// *InputError.
 func CleanPath(p string) (string, error) {
 	orig := p
 	for strings.HasPrefix(p, "./") {
@@ -29,8 +33,10 @@ func CleanPath(p string) (string, error) {
 		return "", inputErrorf("invalid path %q: must be relative", orig)
 	case strings.Contains(p, `\`):
 		return "", inputErrorf("invalid path %q: contains a backslash", orig)
-	case strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }):
+	case strings.ContainsFunc(p, unicode.IsControl):
 		return "", inputErrorf("invalid path %q: contains a control character", orig)
+	case strings.ContainsFunc(p, func(r rune) bool { return unicode.Is(unicode.Cf, r) }):
+		return "", inputErrorf("invalid path %q: contains an invisible format character", orig)
 	}
 	for seg := range strings.SplitSeq(p, "/") {
 		switch seg {

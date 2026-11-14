@@ -50,6 +50,8 @@ func isCIMDClientID(id string) bool { return strings.HasPrefix(id, "https://") }
 
 // validCIMDURL applies the client identifier URL rules (CIMD-03 §3; plan
 // §5.1). The client must send the canonical form: it is never normalized.
+// The host must not be the app host or a site host on any port, nor end in
+// a dot (an alias of the same name).
 func (m *module) validCIMDURL(s string) bool {
 	if len(s) > maxClientIDLen || strings.ContainsAny(s, "#?") {
 		return false
@@ -66,12 +68,10 @@ func (m *module) validCIMDURL(s string) bool {
 			return false
 		}
 	}
-	if u.Scheme+"://"+u.Host == Issuer(m.d.Config) {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
+	host := u.Hostname()
 	sites := m.d.Config.SitesDomain
-	return host != sites && !strings.HasSuffix(host, "."+sites)
+	return !strings.HasSuffix(host, ".") && host != m.d.Config.AppHost &&
+		host != sites && !strings.HasSuffix(host, "."+sites)
 }
 
 // clientMetadata is the subset of a client's metadata handbill uses.
@@ -159,10 +159,11 @@ func has(doc map[string]json.RawMessage, k string) bool {
 }
 
 // cleanClientName is a client name for display: trimmed, without control
-// characters, at most maxClientNameLen runes.
+// or format characters (bidi overrides and isolates, zero-width
+// characters, BOM), at most maxClientNameLen runes.
 func cleanClientName(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || r == utf8.RuneError {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == utf8.RuneError {
 			return -1
 		}
 		return r

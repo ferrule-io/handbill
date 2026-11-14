@@ -179,7 +179,7 @@ test("the public link works signed out, and rotating it cuts off the old link an
   const panel = page.getByTestId("public-link-panel")
   await expect(panel).toContainText("Shown only now")
   const link = await panel.getByTestId("issued-link").inputValue()
-  expect(link).toMatch(new RegExp(`^${origin}/_auth/share/[A-Za-z0-9_-]{43}$`))
+  expect(link).toMatch(new RegExp(`^${origin}/_auth/share#token=[A-Za-z0-9_-]{43}$`))
   await expect(page.getByTestId("public-link-state")).toHaveText(/On/)
 
   const anonContext = await browser.newContext()
@@ -197,10 +197,16 @@ test("the public link works signed out, and rotating it cuts off the old link an
   // The old cookie is refused on the next request: back to sign-in.
   await anon.reload()
   await expect(anon).toHaveURL(/\/login\?return=/)
-  // The old link is dead; the new one works.
-  const old = await anon.goto(link)
-  expect(old?.status()).toBe(404)
+  // The old link is dead; the new one works. The opener page posts the
+  // token from the fragment, so the neutral page is the form's response, and
+  // the token is gone from the address bar.
+  await anon.goto(link)
   await expect(anon.getByRole("heading", { level: 1 })).toHaveText("This link isn’t active")
+  await expect(anon).toHaveURL(`${origin}/_auth/share`)
+  // A link differing from the current URL only by its fragment would be a
+  // same-document navigation; open it from a fresh page, as a click from
+  // a message would.
+  await anon.goto("about:blank")
   await anon.goto(rotated)
   await expect(anon).toHaveURL(`${origin}/`)
   await expect(anon.getByRole("heading", { level: 1 })).toHaveText("Shared itinerary")

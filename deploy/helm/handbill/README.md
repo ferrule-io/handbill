@@ -46,6 +46,8 @@ helm install handbill oci://ghcr.io/ferrule-io/charts/handbill \
 1. `APP_ORIGIN` (e.g. `dash.example.com`): Routes to the management UI, authentication flows, OAuth 2.1 endpoints, and `/mcp`.
 2. `*.<SITES_DOMAIN>` (e.g. `<site-id>.sites.example.com`): Routes to the artifact static file server.
 
+On a public instance (anyone outside your organization can publish), put `SITES_DOMAIN` on a separate registrable domain (e.g. `example-sites.com`) or list it in the Public Suffix List. Under the app's own registrable domain, site scripts are same-site with the app and can set cookies on the parent domain: enough to evict a visitor's app session or make app requests too large for the ingress (denial of service; `__Host-` cookies, Origin checks, and CSRF tokens prevent anything worse).
+
 ### Ingress Enabled (`ingress.enabled=true`)
 
 When `ingress.enabled=true`, the chart creates a Kubernetes Ingress resource with two rules:
@@ -131,12 +133,14 @@ externalDatabase:
   port: 5432
   database: "handbill"
   user: "handbill"
-  sslmode: "require"
+  sslmode: "verify-full"
   existingSecret: "postgres-credentials"
   existingSecretPasswordKey: "password"
 ```
 
 The container receives standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGSSLMODE` environment variables.
+
+`sslmode` defaults to `verify-full`: the connection is encrypted and the server certificate must chain to a trusted root and match `host`. The image trusts the public CA bundle; for a provider or private CA (RDS, Cloud SQL server CAs, a self-signed cluster), mount the CA certificate and point `PGSSLROOTCERT` at it with `extraEnv`. Weaker modes (`require`, `prefer`) encrypt without authenticating the server, so anyone on the network path can impersonate the database. The bundled database (`postgresql.enabled=true`) keeps `sslmode=disable`, since its traffic stays inside the cluster.
 
 #### Option B: Full DSN (`DATABASE_URL`) via existing Secret
 
@@ -342,7 +346,7 @@ Dry runs can be triggered manually via `workflow_dispatch` in GitHub Actions by 
 | `externalDatabase.port` | External PostgreSQL port | `5432` |
 | `externalDatabase.database` | External PostgreSQL database name | `""` |
 | `externalDatabase.user` | External PostgreSQL username | `""` |
-| `externalDatabase.sslmode` | PostgreSQL SSL mode | `prefer` |
+| `externalDatabase.sslmode` | PostgreSQL SSL mode | `verify-full` |
 | `externalDatabase.existingSecret` | Secret containing external DB password or DSN | `""` |
 | `externalDatabase.existingSecretPasswordKey` | Key for external DB password | `password` |
 | `externalDatabase.existingSecretDsnKey` | Key for full DSN (`DATABASE_URL`) | `""` |

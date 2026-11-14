@@ -48,8 +48,9 @@ func logRequests(log *slog.Logger, probe func(*http.Request) bool, next http.Han
 	})
 }
 
-// LogPath returns a request path safe to log: paths under /_auth/ carry
-// tokens (e.g. /_auth/share/<token>), so only their first segment is kept.
+// LogPath returns a request path safe to log: paths under /_auth/ may carry
+// tokens (a mistyped or old-style link such as /_auth/share/<token>), so
+// only their first segment is kept.
 func LogPath(p string) string {
 	rest, ok := strings.CutPrefix(p, "/_auth/")
 	if !ok {

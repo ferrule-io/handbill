@@ -93,15 +93,18 @@ WHERE id = @id;
 DELETE FROM google_identities WHERE user_id = @user_id;
 
 -- name: CreateRecoveryCode :exec
-INSERT INTO recovery_codes (id, user_id, code_hash) VALUES (@id, @user_id, @code_hash);
+INSERT INTO recovery_codes (id, user_id, code_hash, lookup_hash)
+VALUES (@id, @user_id, @code_hash, @lookup_hash);
 
 -- name: DeleteRecoveryCodes :exec
 DELETE FROM recovery_codes WHERE user_id = @user_id;
 
--- name: ListUnusedRecoveryCodes :many
-SELECT id, code_hash FROM recovery_codes
-WHERE user_id = @user_id AND consumed_at IS NULL
-ORDER BY id;
+-- GetRecoveryCodeForSignIn returns the unused code with lookup_hash when
+-- its account claims email (verified or not); no row otherwise.
+-- name: GetRecoveryCodeForSignIn :one
+SELECT r.id, r.user_id, r.code_hash FROM recovery_codes r
+WHERE r.lookup_hash = @lookup_hash AND r.consumed_at IS NULL
+  AND EXISTS (SELECT 1 FROM emails e WHERE e.user_id = r.user_id AND e.email = @email);
 
 -- name: ConsumeRecoveryCode :execrows
 UPDATE recovery_codes SET consumed_at = now() WHERE id = @id AND consumed_at IS NULL;

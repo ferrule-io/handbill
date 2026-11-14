@@ -54,8 +54,14 @@ type staged struct {
 	size              int64
 }
 
+// ErrNotCreator is returned when an account other than a deployment's
+// creator adds to, uploads into, or finalizes it: a deployment belongs to
+// whoever created it, so another manager cannot slip files into a publish
+// that will go out under someone else's name.
+var ErrNotCreator = errors.New("sites: deployment was created by another account")
+
 // CreateDeployment opens a staged publish on a site; ErrNotFound when the
-// site does not exist.
+// site does not exist. Only by can add to, upload into, or finalize it.
 func (s *Service) CreateDeployment(ctx context.Context, siteID string, by uuid.UUID, mode Mode) (uuid.UUID, error) {
 	if !mode.valid() {
 		return uuid.Nil, inputErrorf("invalid mode %q: want replace or merge", mode)
@@ -73,17 +79,26 @@ func (s *Service) CreateDeployment(ctx context.Context, siteID string, by uuid.U
 	return id, nil
 }
 
-// openDeployment returns an open deployment, ErrNotFound, or
-// ErrDeploymentClosed.
-func (s *Service) openDeployment(ctx context.Context, id uuid.UUID) (db.Deployment, error) {
+// openDeployment returns an open deployment created by by, ErrNotFound,
+// ErrNotCreator, or ErrDeploymentClosed.
+func (s *Service) openDeployment(ctx context.Context, id, by uuid.UUID) (db.Deployment, error) {
 	d, err := db.New(s.db).GetDeployment(ctx, id)
 	if err != nil {
 		return db.Deployment{}, notFound(err)
+	}
+	if !isCreator(d.CreatedBy, by) {
+		return db.Deployment{}, ErrNotCreator
 	}
 	if d.State != "open" {
 		return db.Deployment{}, ErrDeploymentClosed
 	}
 	return d, nil
+}
+
+// isCreator reports whether user created a deployment; nobody did once the
+// creator's account is deleted.
+func isCreator(createdBy uuid.NullUUID, user uuid.UUID) bool {
+	return createdBy.Valid && createdBy.UUID == user
 }
 
 // Deployment is a staged publish's state.
@@ -96,6 +111,10 @@ type Deployment struct {
 	CreatedAt time.Time
 }
 
+// IsCreator reports whether user created the deployment, the only account
+// that may add to, upload into, or finalize it.
+func (d Deployment) IsCreator(user uuid.UUID) bool { return isCreator(d.CreatedBy, user) }
+
 // GetDeployment returns a deployment in any state, or ErrNotFound.
 func (s *Service) GetDeployment(ctx context.Context, id uuid.UUID) (Deployment, error) {
 	d, err := db.New(s.db).GetDeployment(ctx, id)
@@ -105,11 +124,11 @@ func (s *Service) GetDeployment(ctx context.Context, id uuid.UUID) (Deployment, 
 	return Deployment{ID: d.ID, SiteID: d.SiteID, Mode: Mode(d.Mode), State: d.State, CreatedBy: d.CreatedBy, CreatedAt: d.CreatedAt}, nil
 }
 
-// AddFiles stores the files' blobs and adds them to an open deployment,
-// replacing earlier additions or deletions of the same paths. Within one
-// call a repeated path keeps its last occurrence.
-func (s *Service) AddFiles(ctx context.Context, deployment uuid.UUID, files []File) error {
-	d, err := s.openDeployment(ctx, deployment)
+// AddFiles stores the files' blobs and adds them to an open deployment
+// created by by, replacing earlier additions or deletions of the same
+// paths. Within one call a repeated path keeps its last occurrence.
+func (s *Service) AddFiles(ctx context.Context, deployment, by uuid.UUID, files []File) error {
+	d, err := s.openDeployment(ctx, deployment, by)
 	if err != nil {
 		return err
 	}
@@ -136,7 +155,8 @@ func (s *Service) AddFiles(ctx context.Context, deployment uuid.UUID, files []Fi
 }
 
 // putBlob uploads a blob unless the site already has it (site_blobs is the
-// record; the store cannot list).
+// record; the store cannot list). ErrNotFound when the site is deleted
+// meanwhile.
 func (s *Service) putBlob(ctx context.Context, siteID string, sum [sha256.Size]byte, size int64, open func() (io.Reader, error)) error {
 	q := db.New(s.db)
 	exists, err := q.SiteBlobExists(ctx, db.SiteBlobExistsParams{SiteID: siteID, Sha256: sum[:]})
@@ -155,7 +175,19 @@ func (s *Service) putBlob(ctx context.Context, siteID string, sum [sha256.Size]b
 	if err := s.store.Put(ctx, blobKey(siteID, sum[:]), r, size, "application/octet-stream"); err != nil {
 		return fmt.Errorf("sites: store blob: %w", err)
 	}
-	if err := q.CreateSiteBlob(ctx, db.CreateSiteBlobParams{SiteID: siteID, Sha256: sum[:], Size: size}); err != nil {
+	err = q.CreateSiteBlob(ctx, db.CreateSiteBlobParams{SiteID: siteID, Sha256: sum[:], Size: size})
+	if isForeignKeyViolation(err) {
+		// The site was deleted since the check. Delete commits DeleteSite,
+		// then clears the site's storage prefix: an object written before
+		// that clear is gone with it, and one written after it (this case)
+		// can only follow the committed delete, so this insert sees no site
+		// and the object is removed here. Either way none is left behind.
+		if err := s.store.Delete(context.WithoutCancel(ctx), blobKey(siteID, sum[:])); err != nil {
+			s.logger.Error("sites: remove blob of a deleted site", "site", siteID, "err", err)
+		}
+		return ErrNotFound
+	}
+	if err != nil {
 		return fmt.Errorf("sites: record blob: %w", err)
 	}
 	return nil
@@ -204,14 +236,14 @@ func lockOpen(ctx context.Context, q *db.Queries, deployment uuid.UUID) error {
 }
 
 // DeletePaths records paths to remove from the current version when a
-// merge deployment is finalized. Paths the version does not have are
-// ignored. Replace deployments reject deletions: they publish only what
-// they contain.
-func (s *Service) DeletePaths(ctx context.Context, deployment uuid.UUID, paths []string) error {
+// merge deployment created by by is finalized. Paths the version does not
+// have are ignored. Replace deployments reject deletions: they publish only
+// what they contain.
+func (s *Service) DeletePaths(ctx context.Context, deployment, by uuid.UUID, paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	d, err := s.openDeployment(ctx, deployment)
+	d, err := s.openDeployment(ctx, deployment, by)
 	if err != nil {
 		return err
 	}
@@ -244,18 +276,22 @@ func (s *Service) DeletePaths(ctx context.Context, deployment uuid.UUID, paths [
 	})
 }
 
-// Finalize atomically turns an open deployment into a new version and makes
-// it current. Merge deployments build on the site's current version at
-// finalize time: the site row stays locked until commit, so concurrent
-// merges apply one after the other and never drop each other's files. A
-// deployment finalizes at most once; one with no files or deletions, or
-// whose result would have no files, is rejected and stays open.
-func (s *Service) Finalize(ctx context.Context, deployment uuid.UUID) (Version, error) {
+// Finalize atomically turns an open deployment created by by into a new
+// version, published by by, and makes it current. Merge deployments build
+// on the site's current version at finalize time: the site row stays
+// locked until commit, so concurrent merges apply one after the other and
+// never drop each other's files. A deployment finalizes at most once; one
+// with no files or deletions, or whose result would have no files, is
+// rejected and stays open.
+func (s *Service) Finalize(ctx context.Context, deployment, by uuid.UUID) (Version, error) {
 	var out Version
 	err := db.InTx(ctx, s.db, func(q *db.Queries) error {
 		d, err := q.LockDeployment(ctx, deployment)
 		if err != nil {
 			return notFound(err)
+		}
+		if !isCreator(d.CreatedBy, by) {
+			return ErrNotCreator
 		}
 		if d.State != "open" {
 			return ErrDeploymentClosed
@@ -275,7 +311,7 @@ func (s *Service) Finalize(ctx context.Context, deployment uuid.UUID) (Version, 
 		if Mode(d.Mode) == Merge {
 			base = site.CurrentVersionID
 		}
-		v, err := q.CreateVersion(ctx, db.CreateVersionParams{ID: uuid.Must(uuid.NewV7()), SiteID: d.SiteID, PublishedBy: d.CreatedBy})
+		v, err := q.CreateVersion(ctx, db.CreateVersionParams{ID: uuid.Must(uuid.NewV7()), SiteID: d.SiteID, PublishedBy: uuid.NullUUID{UUID: by, Valid: true}})
 		if err != nil {
 			return err
 		}
@@ -303,7 +339,7 @@ func (s *Service) Finalize(ctx context.Context, deployment uuid.UUID) (Version, 
 		return nil
 	})
 	var ie *InputError
-	if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrDeploymentClosed) && !errors.As(err, &ie) {
+	if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNotCreator) && !errors.Is(err, ErrDeploymentClosed) && !errors.As(err, &ie) {
 		return Version{}, fmt.Errorf("sites: finalize: %w", err)
 	}
 	return out, err
@@ -320,13 +356,13 @@ func (s *Service) Publish(ctx context.Context, siteID string, by uuid.UUID, mode
 		return Version{}, err
 	}
 	v, err := func() (Version, error) {
-		if err := s.AddFiles(ctx, dep, files); err != nil {
+		if err := s.AddFiles(ctx, dep, by, files); err != nil {
 			return Version{}, err
 		}
-		if err := s.DeletePaths(ctx, dep, deletePaths); err != nil {
+		if err := s.DeletePaths(ctx, dep, by, deletePaths); err != nil {
 			return Version{}, err
 		}
-		return s.Finalize(ctx, dep)
+		return s.Finalize(ctx, dep, by)
 	}()
 	if err != nil {
 		// Best effort: an open leftover is harmless and collected by GC.

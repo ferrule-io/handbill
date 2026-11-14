@@ -187,13 +187,13 @@ non-obvious SQL:
 | `DeleteClientGrants :execrows` | `DELETE FROM oauth_grants WHERE client_id = $1` (CIMD `client_id` mismatch) |
 | `DeleteExpiredAuthorizationRequests :exec` | per user |
 | `CreateAuthorizationRequest :one` | |
-| `GetAuthorizationRequest :one` | `WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()`, joined with the client's `client_id`, `client_name`, `registration`, `redirect_uris` |
+| `GetAuthorizationRequest :one` | `WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()`, joined with the client's `client_id`, `client_name`, `registration` |
 | `TakeAuthorizationRequest :one` | `DELETE … WHERE token_hash = $1 AND user_id = $2 AND expires_at > now() RETURNING *` |
 | `GrantExists :one` | `(user_id, client_id)` |
 | `UpsertGrant :one` | `INSERT … ON CONFLICT (user_id, client_id) DO UPDATE SET scopes = EXCLUDED.scopes, updated_at = now() RETURNING *` |
 | `CreateAuthorizationCode :one` | |
 | `ConsumeAuthorizationCode :one` | `UPDATE oauth_authorization_codes SET consumed_at = now() WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now() RETURNING *` |
-| `GetAuthorizationCodeByHash :one` | reuse detection after a failed consume |
+| `GetAuthorizationCodeForUpdate :one` | reuse detection after a failed consume; `FOR UPDATE` waits for a concurrent exchange |
 | `GetGrantWithClient :one` | grant + client row by grant id |
 | `CreateAccessToken :one`, `CreateRefreshToken :one` | |
 | `GetRefreshTokenForUpdate :one` | `WHERE token_hash = $1 FOR UPDATE` |
@@ -209,7 +209,7 @@ non-obvious SQL:
 ```sql
 -- name: GetAccessTokenPrincipal :one
 SELECT t.id, t.grant_id, t.family_id, t.scopes, t.expires_at,
-       g.user_id, c.client_id AS client_key, c.client_name,
+       g.user_id, c.client_id AS client_key, c.client_name, c.registration,
        e.email, coalesce(e.verified, false) AS email_verified
 FROM oauth_access_tokens t
 JOIN oauth_grants g ON g.id = t.grant_id
@@ -300,9 +300,11 @@ not an OpenID provider, and MCP clients try the RFC 8414 URL first.
 
 Only GET (OAuth 2.1 MUST). Each step either passes or produces exactly one outcome.
 
-**Phase A — errors that must not redirect** (OAuth 2.1 §4.1.2.1). These answer
-`303 See Other` to `/consent?error=<code>`, which renders a fixed message. The page never shows text from
-the request.
+**Every error goes to the consent error page** (OAuth 2.1 §4.1.2.1; RFC 9700 §4.11.1: the redirect URI is
+not trusted before the user has seen the consent screen). These answer `303 See Other` to
+`/consent?error=<code>`, which renders a fixed message. The page never shows text from the request.
+
+**Phase A — the client.**
 
 | # | Check | `error` code |
 |---|---|---|
@@ -315,9 +317,7 @@ the request.
 Every redirect URI is required, even when the client registered just one. MCP clients always send one,
 and loopback port matching needs it.
 
-**Phase B — errors that redirect.** These answer `302 Found` to the redirect URI. Keep its existing query
-and add `error`, `error_description` (fixed ASCII strings), `state` (if one was sent and valid), and
-`iss=<Issuer>`.
+**Phase B — the rest of the request.** Checked signed in or not, so an error never waits for sign-in.
 
 | # | Check | `error` |
 |---|---|---|
@@ -345,7 +345,7 @@ row now cached.
 as sent, `state`, `code_challenge`, `resource = Resource(cfg)`, and the kept scopes. Answer `303` to
 `/consent?request=<plaintext>` with `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
 
-Failures inside Phase D are `server_error` redirects.
+Failures inside Phase D are `/consent?error=server_error`.
 
 ### 4.4 Consent page `/consent` (web) and `/app-api/oauth/consent`
 
@@ -395,7 +395,7 @@ Failures inside Phase D are `server_error` redirects.
 }
 ```
 
-`verified` = `registration == "cimd"`. For DCR, `host` is the first redirect URI's host and `clientId` is
+`verified` = `registration == "cimd"`. For DCR, `host` is the requested redirect URI's host and `clientId` is
 the opaque id. `404 {"error":{"code":"request_not_found"}}` when the row is missing, expired, or another
 user's.
 
@@ -429,17 +429,18 @@ Then `client_id` is required. Look it up with `GetClientByClientID`; unknown →
 client while DCR is disabled → `invalid_client`. The token endpoint never refetches CIMD documents: it
 needs only the stored client row.
 
-**`grant_type=authorization_code`** (`code`, `redirect_uri`, `code_verifier`, optional `resource`):
+**`grant_type=authorization_code`** (`code`, `redirect_uri`, `code_verifier`, optional `resource`). Steps 2–7
+run in one transaction, so a replay that locks the code row waits until the pair exists:
 
 1. `code_verifier` matches `^[A-Za-z0-9._~-]{43,128}$` → else `invalid_request`.
-2. `ConsumeAuthorizationCode(hash(code))`. No row → `GetAuthorizationCodeByHash`. If a consumed code
+2. `ConsumeAuthorizationCode(hash(code))`. No row → `GetAuthorizationCodeForUpdate`. If a consumed code
    exists, run `RevokeAccessTokenFamily(code.id)` and `RevokeRefreshTokenFamily(code.id)`, log
    `oauth code reuse` with the grant id, and answer `invalid_grant`. Otherwise (unknown or expired),
    `invalid_grant`.
 3. Load the grant and client. `client.client_id != client_id` → `invalid_grant`.
 4. `redirect_uri` must byte-equal the stored one, including the port the client used → else `invalid_grant`.
 5. `base64url_nopad(sha256(code_verifier)) == code_challenge` (constant-time compare) → else `invalid_grant`.
-6. `resource` present and `!= stored resource` → `invalid_target`.
+6. `resource` present and `!= stored resource` → `invalid_target`. A code failing 3–6 stays consumed.
 7. Issue the pair (below) with `family_id = code.id`, then `TouchGrant`.
 
 **`grant_type=refresh_token`** (`refresh_token`, optional `resource`, optional `scope`). One transaction:
@@ -504,7 +505,7 @@ otherwise ignored. Validation (`400 {"error": "invalid_redirect_uri" | "invalid_
 - `grant_types`: absent, or containing `authorization_code` and only values from
   `{authorization_code, refresh_token}`.
 - `response_types`: absent or exactly `["code"]`.
-- `client_name`: optional string. Trim it, drop control characters, cap at 100 runes. `client_secret` is
+- `client_name`: optional string. Trim it, drop control and format (Cf) characters, cap at 100 runes. `client_secret` is
   never issued.
 
 `CreateDCRClient` with `client_id = <new uuid string>`. Response `201`, `Cache-Control: no-store`:
@@ -544,8 +545,8 @@ A `client_id` beginning with `https://` is a CIMD URL. Reject (`invalid_client`)
   says SHOULD NOT; we refuse queries, which also keeps cache keys simple).
 - The host is non-empty. A port is allowed.
 - The path is not empty, not `/`, and has no `.` or `..` segment.
-- The origin (scheme://host[:port]) is not `APP_ORIGIN`. The host is not `SITES_DOMAIN` or under it
-  (`*.SITES_DOMAIN` serves user content).
+- The hostname (any port) is not the `APP_ORIGIN` host, not `SITES_DOMAIN` or under it (`*.SITES_DOMAIN`
+  serves user content), and does not end in `.` (an alias of the same name).
 - ≤ 2048 bytes.
 
 IP-literal hosts are not refused here; `safehttp` refuses special-use addresses at dial time.
@@ -588,8 +589,8 @@ Concurrent authorizations may both fetch; `UpsertCIMDClient` makes that harmless
 Parse into `map[string]json.RawMessage` (keep the raw bytes for `metadata`), then:
 
 1. A JSON object whose `client_id` string byte-equals the fetched URL (§4 MUST).
-2. `client_name`: a non-empty string after trimming (MCP requires it). Display value: control characters
-   removed, capped at 100 runes. Stored in `client_name`.
+2. `client_name`: a non-empty string after trimming (MCP requires it). Display value: control and format
+   (Cf: bidi overrides, isolates, zero-width characters, BOM) characters removed, capped at 100 runes. Stored in `client_name`.
 3. `redirect_uris`: an array of strings with at most 20 entries. Entries that fail [§5.5](#55-redirect-uri-rules-and-loopback-matching)
    are dropped (e.g. private-use schemes for other ASes). At least one must remain. Stored in `redirect_uris`.
 4. `client_secret` or `client_secret_expires_at` present → invalid (§4.1).
@@ -764,7 +765,7 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context
    {"error":"invalid_token","error_description":"Authentication required."}
    ```
 2. A `Bearer` value that is not exactly one 43-character base64url token, or `GetAccessTokenPrincipal(hash,
-   Resource(cfg))` finds no row →
+   Resource(cfg))` finds no row, or the token's client is DCR-registered while `OAUTH_DCR_ENABLED=false` →
    ```
    401, WWW-Authenticate: Bearer error="invalid_token", error_description="The access token is invalid, expired, or revoked.", resource_metadata="…/mcp"
    ```

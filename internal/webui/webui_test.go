@@ -1,10 +1,19 @@
 package webui
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/ferrule-io/handbill/internal/config"
+	"github.com/ferrule-io/handbill/internal/server"
 )
 
 func testFS() fstest.MapFS {
@@ -106,5 +115,74 @@ func TestPlaceholderWhenNotBuilt(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/site", nil))
 	if rec.Code != 404 {
 		t.Errorf("/site: %d", rec.Code)
+	}
+}
+
+// Every exported page gets a CSP that allows exactly its own inline
+// scripts (by hash), plus framing and base-URI protection.
+func TestPageCSP(t *testing.T) {
+	const theme, payload = `(()=>{document.documentElement.dataset.t="x"})()`, `self.__next_f.push([1,"a\u003cb"])`
+	fsys := testFS()
+	fsys["index.html"] = &fstest.MapFile{Data: []byte(`<!doctype html><html><head><script src="/_next/static/chunks/app.js" async=""></script>` +
+		`<script>` + theme + `</script></head><body><p style="color:red">hi</p><script>` + payload + `</script><script>` + theme + `</script></body></html>`)}
+	h, err := New(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	}
+	for _, p := range []string{"/", "/nope"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+		csp := rec.Header().Get("Content-Security-Policy")
+		for _, want := range []string{"default-src 'self'", "object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'", "style-src 'self' 'unsafe-inline'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: CSP %q lacks %q", p, csp, want)
+			}
+		}
+		if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") || strings.Contains(csp, "'unsafe-eval'") {
+			t.Errorf("%s: CSP allows arbitrary script: %q", p, csp)
+		}
+		if p == "/" {
+			want := "script-src 'self' " + strings.Join(sortedStrings(hash(payload), hash(theme)), " ") + ";"
+			if !strings.Contains(csp, want) {
+				t.Errorf("CSP %q, want %q", csp, want)
+			}
+		}
+		if rec.Header().Get("X-Frame-Options") != "DENY" {
+			t.Errorf("%s: no X-Frame-Options", p)
+		}
+	}
+	// Non-HTML files carry no page policy.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/_next/static/chunks/app.js", nil))
+	if rec.Header().Get("Content-Security-Policy") != "" {
+		t.Errorf("CSP on a script file")
+	}
+}
+
+func sortedStrings(s ...string) []string { slices.Sort(s); return s }
+
+// An https APP_ORIGIN pins the app host to HTTPS; plain http (local
+// development) does not.
+func TestHSTS(t *testing.T) {
+	for _, origin := range []string{"https://dash.example.com", "http://dash.localhost:8080"} {
+		u, _ := url.Parse(origin)
+		d := &server.Deps{
+			Config: &config.Config{AppOrigin: u, AppHost: u.Hostname(), SitesDomain: "sites.example.com"},
+			Logger: slog.New(slog.DiscardHandler),
+		}
+		h, err := server.New(d, Register)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", origin+"/", nil))
+		got := rec.Header().Get("Strict-Transport-Security")
+		if want := u.Scheme == "https"; (got == "max-age=31536000") != want || (!want && got != "") {
+			t.Errorf("%s: HSTS %q", origin, got)
+		}
 	}
 }

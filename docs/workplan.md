@@ -495,8 +495,9 @@ func Authorized(c token.SiteCookie, a sites.Access) bool
 ```
 
 `siteserver` registers `GET /` and reserves `GET /_auth/` on the sites mux
-(404 for anything it does not handle); W6 adds the more specific
-`GET /_auth/share/{token}`.
+(404 for anything it does not handle); W6 adds the more specific public-link
+routes (since W9a `GET /_auth/share`, the opener page, and `POST
+/_auth/share`; the token travels in the fragment).
 
 Additions beyond the signatures above (all additive):
 
@@ -621,7 +622,7 @@ Owns: `internal/sharing/` (invites, ownership transfers, public links,
 membership changes), `internal/mcp/tools_sharing.go` (`list_members`,
 `share_site`, `set_member_role`, `revoke_access`, `set_public_link`,
 `transfer_ownership`; also `notify` on `publish_site` via
-`sharing.Service.NotifyUpdate`), `GET /_auth/share/{token}` on the sites mux,
+`sharing.Service.NotifyUpdate`), `GET`/`POST /_auth/share` on the sites mux,
 `/app-api/sites/{id}/members…`, `/app-api/invites…`, role enforcement across
 `/app-api`, MCP, and `siteserver.Authorized`; web `app/invite/`
 (`components/auth/invite-accept.tsx`), `components/site/members*.tsx`,
@@ -636,8 +637,9 @@ type Service struct{ /* unexported */ }
 func NewService(d *server.Deps) *Service
 func (s *Service) MailEnabled() bool
 func (s *Service) SetMailer(m mail.Sender) // test seam (mcp tests use a fake)
-// NotifyUpdate emails the other members that a new version is live (Publish role).
-func (s *Service) NotifyUpdate(ctx context.Context, siteID string, by uuid.UUID) (sent int, enabled bool, err error)
+// NotifyUpdate emails the other members that a new version is live (Publish role);
+// reason says why nothing was sent (mail_disabled, sender_unverified, send_failed).
+func (s *Service) NotifyUpdate(ctx context.Context, siteID string, by uuid.UUID) (sent int, reason NotSentReason, err error)
 
 // Errors: ErrNotFound (no site or no role: same answer), ErrForbidden,
 // ErrNoSuchMember, ErrAlreadyMember, ErrOwner, ErrLinkUnusable,
@@ -649,6 +651,7 @@ type Invitation struct {
 	Link    string // APP_ORIGIN/invite#token=<token>, every time
 	Granted bool   // verified holder got the role now (link already used up for them)
 	Emailed bool
+	NotEmailedReason NotSentReason // notify set but not emailed (W9: only verified senders mail)
 }
 func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email string, role rbac.Role, notify bool) (Invitation, error)
 // Accept redeems an invite or a transfer link (one token namespace).
@@ -660,7 +663,7 @@ func (s *Service) SetRole(ctx context.Context, siteID string, by, member uuid.UU
 const LinkEnable, LinkDisable, LinkRotate = "enable", "disable", "rotate"
 func (s *Service) SetPublicLink(ctx context.Context, siteID string, by uuid.UUID, op string) (link string, err error)
 func (s *Service) PublicLinkState(ctx context.Context, siteID string, by uuid.UUID) (PublicLink, error)
-type Transfer struct { Email string; CreatedAt, ExpiresAt time.Time; Link string; Emailed bool }
+type Transfer struct { Email string; CreatedAt, ExpiresAt time.Time; Link string; Emailed bool; NotEmailedReason NotSentReason }
 func (s *Service) StartTransfer(ctx context.Context, siteID string, by uuid.UUID, email string, notify bool) (Transfer, error)
 func (s *Service) PendingTransfer(ctx context.Context, siteID string, by uuid.UUID) (*Transfer, error)
 func (s *Service) CancelTransfer(ctx context.Context, siteID string, by uuid.UUID) error
@@ -681,9 +684,10 @@ in design.md (Sharing, Roles, Public links).
   /app-api/sites/{id}/transfer`, `POST /app-api/invites/lookup` (public)
   and `POST /app-api/invites/accept`, tokens in JSON bodies only. Listings
   never return token plaintext; links appear only in the issuing response.
-- `siteserver`: `GET /_auth/share/{token}` (sets the public cookie,
-  `LinkGen` = generation, redirect to `/`); `Authorized` needed no change,
-  since `sites.Access` already loads the link state on every request.
+- `siteserver`: the public-link route (sets the public cookie, `LinkGen` =
+  generation, redirect to `/`; since W9a the token is in the fragment and
+  the opener page posts it to `POST /_auth/share`); `Authorized` needed no
+  change, since `sites.Access` already loads the link state on every request.
 - Queries in `queries/sharing.sql`; no migration (the step-2 schema had
   every table).
 - Tests: `internal/sharing` (service and HTTP: every roles-table row per

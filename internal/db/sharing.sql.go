@@ -438,7 +438,7 @@ func (q *Queries) GrantMembership(ctx context.Context, arg GrantMembershipParams
 const listMembers = `-- name: ListMembers :many
 
 
-SELECT m.user_id, m.role, m.created_at, e.email
+SELECT m.user_id, m.role, m.created_at, e.email, e.verified AS email_verified
 FROM memberships m
 LEFT JOIN emails e ON e.user_id = m.user_id AND e.is_primary
 WHERE m.site_id = $1
@@ -446,10 +446,11 @@ ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, e.ema
 `
 
 type ListMembersRow struct {
-	UserID    uuid.UUID
-	Role      string
-	CreatedAt time.Time
-	Email     *string
+	UserID        uuid.UUID
+	Role          string
+	CreatedAt     time.Time
+	Email         *string
+	EmailVerified *bool
 }
 
 // Sharing (internal/sharing): memberships, invites, ownership transfers, and
@@ -457,8 +458,9 @@ type ListMembersRow struct {
 // the invariants the schema cannot (never downgrading, never touching the
 // owner row outside a transfer).
 // Members ---------------------------------------------------------------
-// ListMembers returns a site's members with their primary email (NULL for
-// an account without one): the owner, then managers, then viewers.
+// ListMembers returns a site's members with their primary email and whether
+// it is verified (NULL for an account without one): the owner, then
+// managers, then viewers.
 func (q *Queries) ListMembers(ctx context.Context, siteID string) ([]ListMembersRow, error) {
 	rows, err := q.db.Query(ctx, listMembers, siteID)
 	if err != nil {
@@ -473,6 +475,7 @@ func (q *Queries) ListMembers(ctx context.Context, siteID string) ([]ListMembers
 			&i.Role,
 			&i.CreatedAt,
 			&i.Email,
+			&i.EmailVerified,
 		); err != nil {
 			return nil, err
 		}
@@ -544,6 +547,38 @@ type MarkInviteConsumedParams struct {
 func (q *Queries) MarkInviteConsumed(ctx context.Context, arg MarkInviteConsumedParams) error {
 	_, err := q.db.Exec(ctx, markInviteConsumed, arg.UserID, arg.ID)
 	return err
+}
+
+const pendingInviteRolesForEmail = `-- name: PendingInviteRolesForEmail :many
+SELECT DISTINCT role FROM invites
+WHERE site_id = $1 AND email = $2 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+`
+
+type PendingInviteRolesForEmailParams struct {
+	SiteID string
+	Email  string
+}
+
+// PendingInviteRolesForEmail returns the roles of an address's unexpired
+// pending invites to a site, which a re-invite would revoke.
+func (q *Queries) PendingInviteRolesForEmail(ctx context.Context, arg PendingInviteRolesForEmailParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, pendingInviteRolesForEmail, arg.SiteID, arg.Email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, err
+		}
+		items = append(items, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const promoteOwner = `-- name: PromoteOwner :exec

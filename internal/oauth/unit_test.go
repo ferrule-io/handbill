@@ -89,6 +89,13 @@ func TestValidCIMDURL(t *testing.T) {
 		"https://dash.example.com/meta":                       false, // APP_ORIGIN
 		"https://sites.example.com/meta":                      false,
 		"https://abcdefghijkl.sites.example.com/meta":         false,
+		"https://abcdefghijkl.sites.example.com./x":           false, // trailing dot
+		"https://sites.example.com:443/meta":                  false,
+		"https://dash.example.com./x":                         false,
+		"https://dash.example.com:443/x":                      false,
+		"https://dash.example.com:8443/x":                     false,
+		"https://client.example./meta":                        false,
+		"https://notsites.example.com/meta":                   true,
 		"https://client.example/" + strings.Repeat("a", 2048): false,
 	} {
 		if got := m.validCIMDURL(s); got != want {
@@ -125,6 +132,25 @@ func TestValidateCIMD(t *testing.T) {
 	meta, _ := validateCIMD(id, []byte(`{"client_id":"`+id+`","client_name":"A\u0007pp","redirect_uris":["myapp://x","http://localhost/cb"]}`))
 	if meta.name != "App" || len(meta.redirectURIs) != 1 {
 		t.Errorf("cleaned metadata = %+v", meta)
+	}
+}
+
+func TestCleanClientName(t *testing.T) {
+	for in, want := range map[string]string{
+		"  Claude Code ":                    "Claude Code",
+		"A\u0007pp":                         "App",
+		"\u202eppA\u202c":                   "ppA",        // bidi override
+		"\u2066App\u2069":                   "App",        // isolate
+		"A\u200bp\u200cp\u200d\ufeff":       "App",        // ZWSP, ZWNJ, ZWJ, BOM
+		"\u200e\u200fApp\u061c":             "App",        // marks
+		"\u00adApp\u2060":                   "App",        // soft hyphen, word joiner
+		"Ünïcödé 名前":                        "Ünïcödé 名前", // letters stay
+		"\u202e \u200b":                     "",
+		strings.Repeat("a", 200) + "\u202e": strings.Repeat("a", maxClientNameLen),
+	} {
+		if got := cleanClientName(in); got != want {
+			t.Errorf("cleanClientName(%+q) = %+q, want %+q", in, got, want)
+		}
 	}
 }
 

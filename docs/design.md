@@ -92,7 +92,16 @@ reserved `/_auth/` is site content, including `/healthz` and `/readyz`.
 - Headers: `Content-Type` from the file's recorded type, `Content-Length`,
   `ETag` = the blob's SHA-256 (`If-None-Match` → 304), `Cache-Control:
   private, no-cache` (so every load re-checks access), `X-Content-Type-Options:
-  nosniff`.
+  nosniff`, and `Strict-Transport-Security: max-age=31536000` when
+  `APP_ORIGIN` is `https`.
+- Service workers are refused: a request carrying `Service-Worker: script`
+  gets 403 before authorization. A worker registered by site content would
+  control `/_auth/` navigations (stealing tickets and public-link tokens) and
+  keep serving cached content after its visitor's access is revoked. Every
+  response that issues a site cookie also sends `Clear-Site-Data:
+  "storage"` (which leaves cookies alone), so the origin's storage and any
+  worker registered earlier are dropped; site content cannot rely on
+  `localStorage` or IndexedDB surviving a sign-in.
 - One request resolves against the version that the access check returned,
   so a concurrent publish or rollback never mixes versions in one response.
 
@@ -180,10 +189,16 @@ so revocation, disabling, and rotation take effect on the next request.
 ### Public links
 
 An owner can enable "anyone with the link" per site. The link is
-`https://<id>.sites.example.com/_auth/share/<token>`; it sets a site cookie and
-redirects to `/`, removing the token from the address bar. Rotating the token
-invalidates the old link and every cookie issued from it. Disabling it reverts
-the site to member-only.
+`https://<id>.sites.example.com/_auth/share#token=<token>`: the token is in the
+fragment, like invite links, so it never reaches server, proxy, or CDN logs.
+`GET /_auth/share` answers a fixed page whose only script (allowed by its
+SHA-256 in a `default-src 'none'` CSP with `form-action 'self'`) clears the
+fragment from the address bar and history and posts the token to `POST
+/_auth/share` (form-encoded, 1 KiB cap). That sets a site cookie and redirects
+(303) to `/`. The POST checks no `Origin`: forcing a browser to redeem a link
+only gives it the anonymous access the link grants. Without JavaScript the
+page says to turn it on. Rotating the token invalidates the old link and
+every cookie issued from it. Disabling it reverts the site to member-only.
 
 - The cookie carries no user and the link's generation; it lasts as long as a
   member cookie (12 h), after which the visitor opens the link again. An
@@ -213,10 +228,17 @@ do not stop an artifact from sending credentialed requests to the app. Required:
   the session cookie: `/mcp` (bearer token), `/oauth/token` and `/oauth/revoke`
   (PKCE/client authentication), and `/api/deployments/<id>/archive` (signed
   short-lived URL).
-- No CORS response ever allows a site origin; credentialed CORS is limited to
-  `APP_ORIGIN`.
 - Site responses send `X-Content-Type-Options: nosniff`, no CORS headers, and
   `Referrer-Policy: no-referrer` on `/_auth/*`.
+- App pages (the static export) send `X-Frame-Options: DENY` and a CSP built
+  per page when the export is indexed: `script-src 'self'` plus the SHA-256 of
+  each of that page's inline scripts (Next's theme bootstrap and RSC payload),
+  `style-src 'self' 'unsafe-inline'` (React renders style attributes),
+  `default-src 'self'`, `object-src 'none'`, `base-uri 'none'`, `form-action
+  'self'`, `frame-ancestors 'none'`. With an `https` `APP_ORIGIN`, every
+  app-host and site-host response sends `Strict-Transport-Security:
+  max-age=31536000` (no `includeSubDomains`: the app does not own its parent
+  domain).
 
 ## Tokens and secrets
 
@@ -226,8 +248,8 @@ response that issues it.
 | Secret | Generated as | Stored as |
 |---|---|---|
 | Session IDs, site tickets, OAuth authorization request handles, OAuth authorization codes, access and refresh tokens, invite and ownership-transfer tokens, public-link tokens, email-verification tokens | 32 random bytes, base64url | SHA-256 of the token; looked up by hash. Single-use tokens (tickets, authorization request handles, authorization codes, invites, transfers, verification) are consumed atomically. |
-| Recovery codes | 16 base32 characters (80 bits), shown grouped | argon2id, compared per account; consumed atomically |
-| Site cookies, signed upload URLs | HMAC-SHA256 with `SECRET_KEY`, carrying subject, site, expiry (site cookies from a public link also carry the link generation) | Not stored; validity also requires the current database state (role or link generation for cookies, an open deployment for upload URLs) |
+| Recovery codes | 16 base32 characters (80 bits), shown grouped | argon2id, plus a unique lookup hash: HMAC-SHA256 of the normalized code under a key derived from `SECRET_KEY`. A sign-in finds the one code by lookup hash and runs argon2id once (on a dummy hash when none matches); consumed atomically. Rotating `SECRET_KEY` invalidates every code. |
+| Site cookies, signed upload URLs | HMAC-SHA256 with `SECRET_KEY`, carrying subject, site, expiry (site cookies from a public link also carry the link generation; upload URLs carry the deployment and the requesting user) | Not stored; validity also requires the current database state (role or link generation for cookies; for upload URLs an open deployment created by the URL's user, who can still publish to the site) |
 | Google client secret, SMTP password, storage credentials | Configuration / Kubernetes Secret | Not in the database |
 
 Consequences:
@@ -249,7 +271,13 @@ Consequences:
   discoverable (resident key preferred, user verification preferred), so
   sign-in is usernameless; an email-first fallback limits the prompt to the
   passkeys of the accounts claiming that address (its verified holder, else
-  every unverified claim). The WebAuthn RP ID is `APP_ORIGIN`'s host and the
+  every unverified claim). An address without passkeys (no account, or
+  Google only) gets the same answer with a decoy instead: one 16-byte
+  credential ID derived from HMAC(`SECRET_KEY`, address), stable across
+  attempts, transports `internal` and `hybrid`; no authenticator holds it,
+  and finishing that ceremony fails like an unknown passkey. Still
+  distinguishable: a real account's credential count, ID lengths, and
+  transports. The WebAuthn RP ID is `APP_ORIGIN`'s host and the
   only accepted origin is `APP_ORIGIN`; the user handle is the user id.
   Sign counts are stored; a counter that goes backwards sets
   `clone_warning` and refuses that sign-in.
@@ -264,6 +292,10 @@ Consequences:
     24 hours; resend from settings). Verifying displaces other accounts'
     unverified claims; an address another account holds verified cannot be
     verified again.
+  - At most 5 accounts may claim one address unverified. Past that, a
+    passkey sign-up with it is refused (`email_unavailable`, naming nobody),
+    and a new Google account whose unverified email it is starts without an
+    email; it gains the address once Google reports it verified.
 - Google identities are linked to an existing account only explicitly, from
   `/settings/security` while signed in. A Google sign-in with a new `sub` creates
   a new account; if another account holds the same email unverified, that
@@ -273,11 +305,16 @@ Consequences:
 - An account always keeps one sign-in method: removing the last passkey or
   unlinking Google when it is the only method is refused.
 - Recovery codes: 10 single-use codes issued right after sign-up (on
-  `/signup/codes`) and shown once, stored hashed. An email plus a code opens a
-  restricted session (15 minutes, never renewed, not visible to other
-  packages as `identity.User`) whose only power is registering a new
-  passkey; doing so replaces it with a normal session. Regenerating
-  invalidates all previous codes.
+  `/signup/codes`) and shown once, stored hashed (see Tokens and secrets).
+  An email plus a code opens a restricted session (15 minutes, never
+  renewed, not visible to other packages as `identity.User`) whose only
+  power is registering a new passkey; doing so replaces it with a normal
+  session. The code must belong to an account claiming the address
+  (verified or not); a wrong code and an unknown address get the same
+  answer at the same cost. Regenerating invalidates all previous codes.
+  Codes issued before the lookup hash existed were deleted (migration
+  `20261114100000_recovery_lookup`); those accounts regenerate them from
+  settings, which shows none remaining.
 - Sessions: `__Host-session` cookie (Secure, HttpOnly, SameSite=Lax, Path=/)
   holding a random token whose SHA-256 is stored. A session expires after 30
   days without use and at most 90 days after sign-in; use renews the idle
@@ -290,7 +327,12 @@ Consequences:
 
 - `share_site` (or the UI) creates an invite for an email and role and always
   returns an invite link: `https://dash.example.com/invite#token=<token>`. With SMTP
-  configured and `notify` set, the link is also emailed.
+  configured, `notify` set, and the inviter's primary email verified, the
+  link is also emailed; otherwise the result says why not
+  (`emailNotSentReason` in the app API, `email_not_sent_reason` in MCP:
+  `mail_disabled`, `sender_unverified`, or `send_failed`). Transfer and
+  update mail follow the same rule: handbill never mails in the name of an
+  unverified address.
 - The invite page keeps the token in `sessionStorage` across the sign-in or
   sign-up redirect (Google round trip), then accepts it with a CSRF-protected
   POST and clears it.
@@ -302,7 +344,11 @@ Consequences:
 - Rules: inviting one of your own addresses is refused; an address whose
   verified holder already has a role is refused (roles change with
   `set_member_role`); re-inviting an address with a pending invite revokes
-  the old link, so only the newest works.
+  the old link, so only the newest works. That needs the right to revoke
+  it: a manager re-inviting an address with a pending manager invite is
+  refused (input error) and nothing changes.
+- Member lists show each member's primary email and whether it is verified
+  (`emailVerified` in the app API, `email_verified` in MCP).
 - Auto-binding uses up the invite: the returned link then only leads its
   holder to the site (accepting it again is a no-op) and works for no other
   account.
@@ -333,7 +379,8 @@ Consequences:
 - Exactly one owner per site.
 - Ownership transfer targets an email and completes when the recipient accepts
   (same binding rules and `INVITE_TTL` expiry as invites). The previous owner
-  becomes a manager.
+  becomes a manager. With `notify`, the link is emailed only when the
+  owner's primary email is verified (see Sharing).
 - A site has at most one pending transfer: starting another replaces it, the
   owner can cancel it, and completing it revokes any other. Its link has the
   invite form (`/invite#token=<token>`); the same page accepts both. The owner
@@ -357,14 +404,21 @@ the one-shot form of the same pipeline.
 
 - Paths are relative and slash-separated. A leading `./` is dropped;
   absolute paths, `.` and `..` segments, empty segments (including a
-  trailing `/`), backslashes, NUL and other control characters, invalid
-  UTF-8, paths over 1024 bytes, and the reserved top-level `_auth/` are
-  rejected. Paths are case-sensitive.
+  trailing `/`), backslashes, NUL and other C0/C1 control characters,
+  invisible format characters (Unicode Cf: bidi overrides and isolates,
+  zero-width characters, BOM), invalid UTF-8, paths over 1024 bytes, and the
+  reserved top-level `_auth/` are rejected. Paths are case-sensitive.
 - Content type comes from the extension (a fixed table of web types, then
   Go's `mime` package, else `application/octet-stream`); textual types get
   `charset=utf-8`. An explicit content type on a file overrides it.
 - Blobs are stored once per site under their SHA-256; a blob the site
-  already has is not uploaded again.
+  already has is not uploaded again. A blob whose site is deleted while it
+  uploads is removed again (the upload fails as not found), so a delete
+  racing an upload leaves no object behind.
+- A deployment belongs to its creator: only they can add files to it, get
+  an upload URL for it, upload into it, or finalize it; other accounts, the
+  owner included, get a "created by another account" error. The version
+  records the creator as its publisher.
 - `replace` publishes exactly the deployment's files and must contain at
   least one. `merge` starts from the version that is current when the
   deployment is finalized (the site row is locked, so concurrent merges
@@ -382,7 +436,11 @@ the one-shot form of the same pipeline.
   site/` produces), that directory is stripped; otherwise paths are kept as
   they are. Limits (`internal/sites/limits.go`): 10 000 entries, 64 MiB per
   file, 512 MiB uncompressed per archive (also the cap on compressed bytes
-  read).
+  read). A zip's entry count is checked before its central directory is
+  read, both as declared (zip64 included) and as headers present, so a
+  directory holding more headers than it declares is rejected. A tar.gz's
+  decompressed stream, tar metadata (PAX, GNU long names) included, is
+  capped at 512 MiB plus 4 KiB per allowed entry.
 
 ## MCP authorization
 
@@ -400,22 +458,42 @@ the one-shot form of the same pipeline.
   `/oauth/register` is served and advertised as `registration_endpoint` in AS
   metadata. Registration is unauthenticated; the consent screen labels DCR
   clients as unverified. Rate limiting it (and `/oauth/authorize`, which
-  triggers CIMD fetches, and `/oauth/token`) is W9's.
+  triggers CIMD fetches, and `/oauth/token`) is W9's. Turning DCR off also
+  stops clients registered earlier: authorize, token, and their access
+  tokens at `/mcp` are refused.
 - Redirect URIs, for CIMD and DCR alike, are absolute, without fragment or
   userinfo, and either `https` or loopback `http` (`127.0.0.1`, `[::1]`,
   `localhost`). A loopback registration matches any port (RFC 8252 §7.3):
   Claude Code registers `http://localhost/callback` and sends a random port.
   Everything else must match byte for byte.
-- CIMD fetching is an SSRF surface: HTTPS only, resolve and reject private,
-  loopback, and link-local addresses, short timeout, 5 KiB response cap, no
-  redirects (any 3xx is an error; CIMD-03 §6), cache per HTTP headers
-  (clamped to 5 min–24 h, revalidated with `If-None-Match`). Verify the
-  document's `client_id` equals its URL and that the requested `redirect_uri`
-  is listed.
-- The consent screen is always shown. It shows the client name, the
-  `client_id` host, and the redirect URI's host; it warns when the redirect
-  goes to a program on this computer (loopback) and labels DCR clients as
-  unverified.
+- `/oauth/authorize` never redirects to the client by itself: a client can
+  register any `https` redirect URI (RFC 9700 §4.11.1). Every error before
+  the consent decision, signed in or not, goes to `/consent?error=<code>`
+  with the OAuth error code (`invalid_request`, `unsupported_response_type`,
+  `invalid_target`, `unauthorized_client`, …). Only the decision redirects:
+  the code, or `access_denied`.
+- A CIMD `client_id` host must not be the app host or `SITES_DOMAIN` or a
+  subdomain, on any port, and must not end in a dot.
+- CIMD fetching is an SSRF surface: HTTPS only, short timeout, 5 KiB
+  response cap, no redirects (any 3xx is an error; CIMD-03 §6), cache per
+  HTTP headers (clamped to 5 min–24 h, revalidated with `If-None-Match`).
+  Resolved addresses are checked before and at dial time, default-deny: only
+  global unicast (IPv6 within `2000::/3`) outside every IANA special-purpose
+  block that is not globally reachable. Mapped, SIIT, IPv4-compatible, and
+  NAT64 `64:ff9b::/96` addresses are judged by their embedded IPv4 address
+  (IPv6-only hosts with DNS64 need NAT64); Teredo, 6to4, and
+  `64:ff9b:1::/48` are refused. Verify the document's `client_id` equals its
+  URL and that the requested `redirect_uri` is listed.
+- The consent screen is always shown. It shows the client name (control and
+  format characters such as bidi overrides removed), the client host, and
+  the redirect URI's host; it warns when the redirect goes to a program on
+  this computer (loopback) and labels DCR clients as unverified. The client
+  host is the `client_id` host for CIMD and, for DCR, the host of the
+  redirect URI this request uses (the grants list shows the first
+  registered one).
+- Exchanging a code consumes it and issues its tokens in one transaction. A
+  replayed code revokes everything it issued; the replay locks the code row
+  first, so it waits for a concurrent exchange and revokes its tokens too.
 - Users review and revoke OAuth grants in `/settings/security`; clients
   revoke tokens at `/oauth/revoke` (RFC 7009).
 
@@ -431,25 +509,25 @@ the one-shot form of the same pipeline.
 | `get_site` | Metadata, URL, current version, public-link state, member count | manager |
 | `update_site` | Title, description | manager |
 | `delete_site` | Delete the site and its versions | owner |
-| `transfer_ownership` | Start a transfer to an email (`notify` emails it with SMTP); returns the acceptance link, replacing any pending transfer | owner |
-| `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` (with SMTP, emails the other members that the site was updated; `notify_result` reports what was sent, or that mail is not configured) | manager |
+| `transfer_ownership` | Start a transfer to an email (`notify` emails it with SMTP when the owner's address is verified; `emailed` and `email_not_sent_reason` report it); returns the acceptance link, replacing any pending transfer | owner |
+| `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` (with SMTP and a verified publisher address, emails the other members that the site was updated; `notify_result` reports what was sent, or why not: mail not configured, publisher's address not verified, or the mail server refused) | manager |
 | `create_deployment` | Start a staged publish (`mode: replace\|merge`); returns a deployment id | manager |
-| `upload_files` | Add files to a staged deployment | manager |
-| `get_upload_url` | Short-lived signed URL to upload a `.tar.gz`/`.zip` into a staged deployment | manager |
-| `finalize_deployment` | Atomically publish a staged deployment as a new version | manager |
+| `upload_files` | Add files to a staged deployment | manager, creator only |
+| `get_upload_url` | Short-lived signed URL, bound to the caller, to upload a `.tar.gz`/`.zip` into a staged deployment | manager, creator only |
+| `finalize_deployment` | Atomically publish a staged deployment as a new version | manager, creator only |
 | `list_files` | Paths, sizes, content types in the current version | manager |
 | `read_file` | Read one file from the current version | manager |
 | `list_versions` | Versions with timestamps and publisher | manager |
 | `rollback_site` | Make a previous version current | manager |
-| `list_members` | Members (user id, email, role), pending invites (invite id, email, role, expiry); never links | manager |
-| `share_site` | Invite an email as viewer or manager; always returns the invite link, plus `granted` (a verified account got access now) and `emailed` (`notify` with SMTP) | manager (viewer), owner (manager) |
+| `list_members` | Members (user id, email, `email_verified`, role), pending invites (invite id, email, role, expiry); never links | manager |
+| `share_site` | Invite an email as viewer or manager; always returns the invite link, plus `granted` (a verified account got access now), `emailed`, and `email_not_sent_reason` (`notify` set but not emailed: `mail_disabled`, `sender_unverified`, `send_failed`) | manager (viewer), owner (manager) |
 | `set_member_role` | Change a member between viewer and manager | owner |
 | `revoke_access` | Remove a member or pending invite, by user id or invite id | manager (viewers), owner (managers) |
 | `set_public_link` | `enable`, `disable`, or `rotate`; enable and rotate return the link, shown only in that result | owner |
 
-Tool annotations: `list_members` is read-only; `revoke_access`,
-`set_public_link`, and `transfer_ownership` are destructive;
-`set_member_role` is idempotent.
+Tool annotations: `list_members` is read-only; `get_upload_url` is not (it
+mints a bearer URL); `revoke_access`, `set_public_link`, and
+`transfer_ownership` are destructive; `set_member_role` is idempotent.
 
 ## Storage
 
@@ -543,7 +621,7 @@ distroless base, running as non-root.
 | Values | Behavior |
 |---|---|
 | `postgresql.enabled` (default `true`) | Bundled single-instance PostgreSQL StatefulSet (official `postgres` image) with a PVC. Intended for small installs. |
-| `externalDatabase.*` | Used when `postgresql.enabled=false`: `host`, `port`, `database`, `user`, and `existingSecret`/`existingSecretPasswordKey`, or a full DSN via `existingSecret`. |
+| `externalDatabase.*` | Used when `postgresql.enabled=false`: `host`, `port`, `database`, `user`, `sslmode` (default `verify-full`), and `existingSecret`/`existingSecretPasswordKey`, or a full DSN via `existingSecret`. The bundled database stays `sslmode=disable` (in-cluster traffic). |
 | `ingress.enabled` (default `false`) | Creates an Ingress with two rules: the app host and `*.<sitesDomain>`. `ingress.className`, `annotations`, and `tls` are configurable. |
 | `storage.type` | `local`, `s3`, or `gcs`, with per-adapter settings; credentials from an existing Secret or workload identity. |
 | `persistence.*` | PVC for the `local` adapter. |
@@ -557,3 +635,13 @@ distroless base, running as non-root.
   requires a DNS-01 issuer.
 - The `local` adapter with more than one replica requires a `ReadWriteMany`
   volume; otherwise use S3 or GCS.
+- `SITES_DOMAIN` should be a separate registrable domain (for example
+  `example-sites.com`), or be listed in the Public Suffix List, on any
+  instance where people outside your organization can publish. Under the
+  app's registrable domain (`sites.example.com` next to `dash.example.com`)
+  site content is same-site with the app: its scripts can set cookies on
+  `example.com` to fill the browser's per-domain cookie jar (evicting the app
+  session) or make every app request's `Cookie` header too large for the
+  ingress, signing visitors out or locking them out of the app until they
+  clear cookies. `__Host-` cookies, Origin checks, and CSRF tokens keep this
+  to denial of service.

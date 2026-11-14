@@ -19,3 +19,9 @@ const (
 	// bigger ones spill to a temporary file.
 	memSpool = 1 << 20
 )
+
+// maxTarStream caps a tar.gz archive's decompressed stream: file data plus
+// tar headers, padding, and PAX and GNU metadata records, which do not
+// count as entries. It allows 4 KiB of such overhead per entry. A variable
+// so tests can lower it.
+var maxTarStream = MaxArchiveSize + MaxArchiveEntries*4<<10

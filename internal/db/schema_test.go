@@ -496,7 +496,7 @@ func TestUserDeletion(t *testing.T) {
 	v, err := q.CreateVersion(ctx, db.CreateVersionParams{ID: newID(), SiteID: site, PublishedBy: uuid.NullUUID{UUID: member, Valid: true}})
 	must(t, err)
 	exec(t, pool, "INSERT INTO sessions (id, token_hash, user_id, expires_at) VALUES ($1, $2, $3, now() + interval '1 day')", newID(), sha("session"), member)
-	exec(t, pool, "INSERT INTO recovery_codes (id, user_id, code_hash) VALUES ($1, $2, '$argon2id$v=19$x')", newID(), member)
+	exec(t, pool, "INSERT INTO recovery_codes (id, user_id, code_hash, lookup_hash) VALUES ($1, $2, '$argon2id$v=19$x', $3)", newID(), member, sha("recovery"))
 	exec(t, pool, "INSERT INTO passkey_credentials (id, user_id, credential_id, public_key) VALUES ($1, $2, '\\x01', '\\x02')", newID(), member)
 	exec(t, pool, "INSERT INTO google_identities (id, user_id, sub) VALUES ($1, $2, 'sub-1')", newID(), member)
 

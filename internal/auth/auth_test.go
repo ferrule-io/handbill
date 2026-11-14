@@ -67,9 +67,8 @@ func TestPasskeySignUpAndSignIn(t *testing.T) {
 	if b2.me().User.ID != me.User.ID {
 		t.Fatal("email-first signed in as another account")
 	}
-	if res := b2.signIn(t, a, "nobody@example.com"); res.status != 404 || res.errorCode(t) != "no_passkey" {
-		t.Fatalf("unknown email: %d %s", res.status, res.body)
-	}
+	// An unknown address gets a ceremony too (TestEmailFirstDecoy).
+	mustStatus(t, "unknown email begin", b2.api("POST", "/app-api/auth/passkey/login/begin", map[string]string{"email": "nobody@example.com"}), 200)
 	if res := b2.api("POST", "/app-api/auth/passkey/signup/begin", map[string]string{"email": "not an email"}); res.errorCode(t) != "invalid_email" {
 		t.Fatalf("bad email: %s", res.body)
 	}
@@ -643,5 +642,123 @@ func TestDescribeUserAgent(t *testing.T) {
 		if got := describeUserAgent(ua); got != want {
 			t.Errorf("%q = %q, want %q", ua, got, want)
 		}
+	}
+}
+
+// A recovery sign-in runs argon2id once whatever the address and code: the
+// lookup hash finds the one candidate, so many accounts claiming an address
+// cannot multiply the work of a guess.
+func TestRecoveryVerifiesOnce(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	var codes [][]string
+	for range 3 {
+		b := e.browser()
+		b.signUp(t, "shared@example.com")
+		codes = append(codes, b.recoveryCodes(t))
+	}
+	other := e.browser()
+	other.signUp(t, "other@example.com")
+	otherCodes := other.recoveryCodes(t)
+
+	r := e.browser()
+	for _, c := range []struct {
+		name, email, code string
+		status            int
+	}{
+		{"wrong code", "shared@example.com", "AAAA-AAAA-AAAA-AAAA", 401},
+		{"unknown email", "nobody@example.com", codes[0][0], 401},
+		{"another account's code", "shared@example.com", otherCodes[0], 401},
+		{"right code", "shared@example.com", codes[2][5], 200},
+	} {
+		e.verifications.Store(0)
+		res := r.api("POST", "/app-api/auth/recovery/signin", map[string]string{"email": c.email, "code": c.code})
+		if res.status != c.status {
+			t.Fatalf("%s: %d %s", c.name, res.status, res.body)
+		}
+		if n := e.verifications.Load(); n != 1 {
+			t.Fatalf("%s: %d argon2id verifications, want 1", c.name, n)
+		}
+	}
+}
+
+// Only a few accounts may claim one address unverified: further passkey
+// sign-ups are refused, and a new Google account gets no claim to it.
+func TestUnverifiedClaimCap(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	for range maxUnverifiedEmailClaims {
+		e.browser().signUp(t, "popular@example.com")
+	}
+	res := e.browser().api("POST", "/app-api/auth/passkey/signup/begin", map[string]string{"email": "Popular@example.com"})
+	if res.status != 400 || res.errorCode(t) != "email_unavailable" {
+		t.Fatalf("sign-up over the cap: %d %s", res.status, res.body)
+	}
+	g := e.browser()
+	location(t, g.googleRoundTrip(t, googleSignIn, "", fakeGrant{sub: "g-cap", email: "popular@example.com", verified: false}))
+	if u := g.me().User; u == nil || u.Email != "" {
+		t.Fatalf("google account over the cap = %+v", u)
+	}
+	var claims int
+	e.scalar(&claims, "SELECT count(*) FROM emails WHERE email = 'popular@example.com'")
+	if claims != maxUnverifiedEmailClaims {
+		t.Fatalf("%d claims", claims)
+	}
+	// A verified holder is not capped: it displaces the claims.
+	v := e.browser()
+	location(t, v.googleRoundTrip(t, googleSignIn, "", fakeGrant{sub: "g-owner", email: "popular@example.com", verified: true}))
+	if u := v.me().User; u == nil || u.Email != "popular@example.com" || !u.EmailVerified {
+		t.Fatalf("verified holder = %+v", u)
+	}
+}
+
+// Email-first sign-in for an address without passkeys looks like one with
+// them: a stable decoy credential, and a finish that fails like a wrong one.
+func TestEmailFirstDecoy(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	a := e.browser().signUp(t, "real@example.com")
+	location(t, e.browser().googleRoundTrip(t, googleSignIn, "", fakeGrant{sub: "g-only", email: "gonly@example.com", verified: true}))
+
+	type allowed struct {
+		Type       string
+		ID         string
+		Transports []string
+	}
+	begin1 := func(email string) (begin, allowed) {
+		t.Helper()
+		res := e.browser().api("POST", "/app-api/auth/passkey/login/begin", map[string]string{"email": email})
+		mustStatus(t, "begin "+email, res, 200)
+		var bg begin
+		res.json(t, &bg)
+		var o struct{ AllowCredentials []allowed }
+		if err := json.Unmarshal(bg.Options, &o); err != nil {
+			t.Fatal(err)
+		}
+		if len(o.AllowCredentials) != 1 {
+			t.Fatalf("%s: allowCredentials %+v", email, o.AllowCredentials)
+		}
+		return bg, o.AllowCredentials[0]
+	}
+	_, real := begin1("real@example.com")
+	for _, email := range []string{"nobody@example.com", "gonly@example.com"} {
+		_, d := begin1(email)
+		_, again := begin1(email)
+		raw, err := b64.DecodeString(d.ID)
+		if err != nil || len(raw) != 16 || d.Type != real.Type || again.ID != d.ID || d.ID == real.ID ||
+			strings.Join(d.Transports, ",") != "internal,hybrid" {
+			t.Fatalf("%s decoy %+v (again %+v), real %+v", email, d, again, real)
+		}
+	}
+	// A real credential presented to a decoy flow fails like an unknown one,
+	// rather than signing in usernameless.
+	b := e.browser()
+	bg, _ := begin1("nobody@example.com")
+	var opts map[string]any
+	if err := json.Unmarshal(bg.Options, &opts); err != nil {
+		t.Fatal(err)
+	}
+	delete(opts, "allowCredentials")
+	stripped, _ := json.Marshal(opts)
+	res := b.api("POST", "/app-api/auth/passkey/login/finish", map[string]any{"flow": bg.Flow, "credential": a.get(t, stripped)})
+	if res.status != 400 || res.errorCode(t) != "unknown_passkey" || b.me().User != nil {
+		t.Fatalf("decoy finish: %d %s", res.status, res.body)
 	}
 }

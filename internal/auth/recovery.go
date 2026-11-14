@@ -15,8 +15,9 @@ import (
 const recoveryCodeCount = 10
 
 // issueRecoveryCodes replaces userID's recovery codes with a fresh set and
-// returns their plaintext, which is shown once and never stored.
-func issueRecoveryCodes(ctx context.Context, q *db.Queries, userID uuid.UUID) ([]string, error) {
+// returns their plaintext, which is shown once and never stored: each code
+// is kept as its argon2id hash and its keyed lookup hash.
+func (m *module) issueRecoveryCodes(ctx context.Context, q *db.Queries, userID uuid.UUID) ([]string, error) {
 	if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {
 		return nil, err
 	}
@@ -27,7 +28,8 @@ func issueRecoveryCodes(ctx context.Context, q *db.Queries, userID uuid.UUID) ([
 		if err != nil {
 			return nil, err
 		}
-		if err := q.CreateRecoveryCode(ctx, db.CreateRecoveryCodeParams{ID: newID(), UserID: userID, CodeHash: h}); err != nil {
+		lookup, _ := token.RecoveryCodeLookup(m.recoveryKey, codes[i]) // well-formed: just generated
+		if err := q.CreateRecoveryCode(ctx, db.CreateRecoveryCodeParams{ID: newID(), UserID: userID, CodeHash: h, LookupHash: lookup}); err != nil {
 			return nil, err
 		}
 	}
@@ -46,7 +48,7 @@ func (m *module) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request)
 		if err := q.LockUser(r.Context(), s.UserID); err != nil {
 			return err
 		}
-		codes, err = issueRecoveryCodes(r.Context(), q, s.UserID)
+		codes, err = m.issueRecoveryCodes(r.Context(), q, s.UserID)
 		return err
 	})
 	if err != nil {
@@ -59,12 +61,16 @@ func (m *module) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request)
 var errBadRecovery = appapi.NewError(http.StatusUnauthorized, "invalid_recovery",
 	"That email and recovery code don't match an account. Check the code and try again.")
 
-// dummyRecoveryHash keeps the response time of an unknown email close to
-// that of a known one.
+// dummyRecoveryHash is verified when no code matches, so every attempt
+// with a well-formed code costs one argon2id whether or not the address or
+// code exists.
 var dummyRecoveryHash, _ = token.HashRecoveryCode(token.NewRecoveryCode())
 
 // recoverySignIn trades an email and an unused recovery code for a
-// restricted session that can only register a new passkey.
+// restricted session that can only register a new passkey. The code's
+// lookup hash finds the one candidate, which must belong to an account
+// claiming the address (verified or not); argon2id then runs once, on it
+// or on dummyRecoveryHash.
 func (m *module) recoverySignIn(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
 		Email string `json:"email"`
@@ -77,39 +83,34 @@ func (m *module) recoverySignIn(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return errBadRequest("invalid_email", "Enter a valid email address.")
 	}
-	claims, err := m.q.ListEmailClaims(r.Context(), email)
+	lookup, ok := token.RecoveryCodeLookup(m.recoveryKey, in.Code)
+	if !ok {
+		return errBadRecovery
+	}
+	code, err := m.q.GetRecoveryCodeForSignIn(r.Context(), db.GetRecoveryCodeForSignInParams{LookupHash: lookup, Email: email})
+	if isNoRows(err) {
+		m.verifyRecovery(dummyRecoveryHash, in.Code)
+		return errBadRecovery
+	}
 	if err != nil {
 		return err
 	}
-	if len(claims) == 0 {
-		token.VerifyRecoveryCode(dummyRecoveryHash, in.Code)
+	if !m.verifyRecovery(code.CodeHash, in.Code) {
 		return errBadRecovery
 	}
-	for _, c := range claims {
-		codes, err := m.q.ListUnusedRecoveryCodes(r.Context(), c.UserID)
+	err = db.InTx(r.Context(), m.d.DB, func(q *db.Queries) error {
+		n, err := q.ConsumeRecoveryCode(r.Context(), code.ID)
 		if err != nil {
 			return err
 		}
-		for _, code := range codes {
-			if !token.VerifyRecoveryCode(code.CodeHash, in.Code) {
-				continue
-			}
-			err := db.InTx(r.Context(), m.d.DB, func(q *db.Queries) error {
-				n, err := q.ConsumeRecoveryCode(r.Context(), code.ID)
-				if err != nil {
-					return err
-				}
-				if n == 0 { // used concurrently
-					return errBadRecovery
-				}
-				return m.replaceSession(r.Context(), q, w, r, c.UserID, true)
-			})
-			if err != nil {
-				return err
-			}
-			appapi.WriteJSON(w, http.StatusOK, map[string]bool{"recovery": true})
-			return nil
+		if n == 0 { // used concurrently
+			return errBadRecovery
 		}
+		return m.replaceSession(r.Context(), q, w, r, code.UserID, true)
+	})
+	if err != nil {
+		return err
 	}
-	return errBadRecovery
+	appapi.WriteJSON(w, http.StatusOK, map[string]bool{"recovery": true})
+	return nil
 }

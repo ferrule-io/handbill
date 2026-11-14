@@ -93,11 +93,12 @@ func upperFirst(s string) string {
 // --- Members ------------------------------------------------------------------
 
 type memberJSON struct {
-	UserID uuid.UUID `json:"userId"`
-	Email  *string   `json:"email"`
-	Role   rbac.Role `json:"role"`
-	You    bool      `json:"you"`
-	Since  time.Time `json:"since"`
+	UserID        uuid.UUID `json:"userId"`
+	Email         *string   `json:"email"`
+	EmailVerified bool      `json:"emailVerified"`
+	Role          rbac.Role `json:"role"`
+	You           bool      `json:"you"`
+	Since         time.Time `json:"since"`
 }
 
 type inviteJSON struct {
@@ -124,7 +125,10 @@ func (a *api) members(w http.ResponseWriter, r *http.Request) error {
 	}
 	members := make([]memberJSON, len(ms))
 	for i, m := range ms {
-		members[i] = memberJSON{UserID: m.UserID, Email: optional(m.Email), Role: m.Role, You: m.UserID == me, Since: m.Since}
+		members[i] = memberJSON{
+			UserID: m.UserID, Email: optional(m.Email), EmailVerified: m.EmailVerified,
+			Role: m.Role, You: m.UserID == me, Since: m.Since,
+		}
 	}
 	invites := make([]inviteJSON, len(is))
 	for i, v := range is {
@@ -148,10 +152,11 @@ func (a *api) invite(w http.ResponseWriter, r *http.Request) error {
 		return apiError(err)
 	}
 	appapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"invite":  map[string]any{"id": inv.ID, "email": inv.Email, "role": inv.Role, "expiresAt": inv.ExpiresAt},
-		"link":    inv.Link,
-		"granted": inv.Granted,
-		"emailed": inv.Emailed,
+		"invite":             map[string]any{"id": inv.ID, "email": inv.Email, "role": inv.Role, "expiresAt": inv.ExpiresAt},
+		"link":               inv.Link,
+		"granted":            inv.Granted,
+		"emailed":            inv.Emailed,
+		"emailNotSentReason": optional(string(inv.NotEmailedReason)),
 	})
 	return nil
 }
@@ -254,9 +259,10 @@ func (a *api) startTransfer(w http.ResponseWriter, r *http.Request) error {
 		return apiError(err)
 	}
 	appapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"transfer": transferJSON{Email: t.Email, CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt},
-		"link":     t.Link,
-		"emailed":  t.Emailed,
+		"transfer":           transferJSON{Email: t.Email, CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt},
+		"link":               t.Link,
+		"emailed":            t.Emailed,
+		"emailNotSentReason": optional(string(t.NotEmailedReason)),
 	})
 	return nil
 }

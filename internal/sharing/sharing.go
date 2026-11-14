@@ -156,10 +156,11 @@ func grantableRole(role rbac.Role) error {
 
 // Member is one account's role on a site.
 type Member struct {
-	UserID uuid.UUID
-	Email  string // primary email; "" for an account without one
-	Role   rbac.Role
-	Since  time.Time
+	UserID        uuid.UUID
+	Email         string // primary email; "" for an account without one
+	EmailVerified bool   // whether Email is verified
+	Role          rbac.Role
+	Since         time.Time
 }
 
 // PendingInvite is an invite that has not been accepted, revoked, or expired.
@@ -185,7 +186,10 @@ func (s *Service) Members(ctx context.Context, siteID string, by uuid.UUID) ([]M
 	}
 	members := make([]Member, len(rows))
 	for i, r := range rows {
-		members[i] = Member{UserID: r.UserID, Email: deref(r.Email), Role: rbac.Role(r.Role), Since: r.CreatedAt}
+		members[i] = Member{
+			UserID: r.UserID, Email: deref(r.Email), EmailVerified: r.EmailVerified != nil && *r.EmailVerified,
+			Role: rbac.Role(r.Role), Since: r.CreatedAt,
+		}
 	}
 	irows, err := q.ListPendingInvites(ctx, siteID)
 	if err != nil {
@@ -275,9 +279,10 @@ type Invitation struct {
 	// link is then already used, and opening it while signed in to that
 	// account just leads to the site.
 	Granted bool
-	// Emailed: notify was set, SMTP is configured, and the message was
-	// handed to the mail server.
-	Emailed bool
+	// Emailed: notify was set and the message was handed to the mail
+	// server. Otherwise, when notify was set, NotEmailedReason says why.
+	Emailed          bool
+	NotEmailedReason NotSentReason
 }
 
 // Invite invites email to a site as viewer or manager and returns the
@@ -286,10 +291,12 @@ type Invitation struct {
 // Rules: inviting one of your own addresses is rejected; an address whose
 // verified holder already has a role is rejected with ErrAlreadyMember
 // (roles change with SetRole); re-inviting an address with a pending invite
-// revokes the old one, so only the newest link works. When an account
+// revokes the old one, so only the newest link works, and so needs the
+// right to revoke it (a manager re-inviting an address with a pending
+// manager invite gets an input error and nothing changes). When an account
 // holds the address verified, it gets the role at once (verified-email
 // auto-binding); otherwise the role goes to whichever account accepts the
-// link.
+// link. Mail goes out only from a verified sender (notifyFrom).
 func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email string, role rbac.Role, notify bool) (Invitation, error) {
 	if err := grantableRole(role); err != nil {
 		return Invitation{}, err
@@ -302,6 +309,7 @@ func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email
 	var (
 		inv            Invitation
 		title, byEmail string
+		byVerified     bool
 	)
 	err := db.InTx(ctx, s.db, func(q *db.Queries) error {
 		site, byRole, err := authorize(ctx, q, siteID, by, rbac.ManageViewers)
@@ -332,6 +340,15 @@ func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email
 				return ErrAlreadyMember
 			}
 		}
+		pending, err := q.PendingInviteRolesForEmail(ctx, db.PendingInviteRolesForEmailParams{SiteID: siteID, Email: addr})
+		if err != nil {
+			return err
+		}
+		for _, r := range pending {
+			if !rbac.Can(byRole, manageAction(rbac.Role(r))) {
+				return inputErrorf("that address has a pending %s invite, which only the owner can replace", r)
+			}
+		}
 		if _, err := q.RevokePendingInvitesForEmail(ctx, db.RevokePendingInvitesForEmailParams{SiteID: siteID, Email: addr}); err != nil {
 			return err
 		}
@@ -352,15 +369,15 @@ func (s *Service) Invite(ctx context.Context, siteID string, by uuid.UUID, email
 		}
 		inv = Invitation{ID: row.ID, Email: addr, Role: role, ExpiresAt: row.ExpiresAt, Granted: hasHolder}
 		title = site.Title
-		byEmail, err = primaryEmail(ctx, q, by)
+		byEmail, byVerified, err = primaryEmail(ctx, q, by)
 		return err
 	})
 	if err != nil {
 		return Invitation{}, err
 	}
 	inv.Link = s.cfg.AppOrigin.String() + "/invite#token=" + plaintext
-	if notify && s.mail.Enabled() {
-		inv.Emailed = s.send(ctx, inviteMessage(addr, byEmail, title, role, inv.Link, inv.ExpiresAt, inv.Granted))
+	if notify {
+		inv.Emailed, inv.NotEmailedReason = s.notifyFrom(ctx, byVerified, inviteMessage(addr, byEmail, title, role, inv.Link, inv.ExpiresAt, inv.Granted))
 	}
 	return inv, nil
 }
@@ -494,15 +511,17 @@ type Transfer struct {
 	Email     string
 	CreatedAt time.Time
 	ExpiresAt time.Time
-	// Link is APP_ORIGIN/invite#token=<token>; set only by StartTransfer.
-	Link    string
-	Emailed bool
+	// Link is APP_ORIGIN/invite#token=<token>; set only by StartTransfer,
+	// like Emailed and NotEmailedReason (as for Invitation).
+	Link             string
+	Emailed          bool
+	NotEmailedReason NotSentReason
 }
 
 // StartTransfer offers the site to email (owner only) and returns the
 // acceptance link, replacing any earlier pending transfer. It completes
 // when an account accepts the link (Accept), with the same binding and
-// INVITE_TTL rules as invites.
+// INVITE_TTL rules as invites. Mail goes out only from a verified sender.
 func (s *Service) StartTransfer(ctx context.Context, siteID string, by uuid.UUID, email string, notify bool) (Transfer, error) {
 	addr, ok := normalizeEmail(email)
 	if !ok {
@@ -512,6 +531,7 @@ func (s *Service) StartTransfer(ctx context.Context, siteID string, by uuid.UUID
 	var (
 		tr             Transfer
 		title, byEmail string
+		byVerified     bool
 	)
 	err := db.InTx(ctx, s.db, func(q *db.Queries) error {
 		site, _, err := authorize(ctx, q, siteID, by, rbac.Transfer)
@@ -537,15 +557,15 @@ func (s *Service) StartTransfer(ctx context.Context, siteID string, by uuid.UUID
 		}
 		tr = Transfer{Email: addr, CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt}
 		title = site.Title
-		byEmail, err = primaryEmail(ctx, q, by)
+		byEmail, byVerified, err = primaryEmail(ctx, q, by)
 		return err
 	})
 	if err != nil {
 		return Transfer{}, err
 	}
 	tr.Link = s.cfg.AppOrigin.String() + "/invite#token=" + plaintext
-	if notify && s.mail.Enabled() {
-		tr.Emailed = s.send(ctx, transferMessage(addr, byEmail, title, tr.Link, tr.ExpiresAt))
+	if notify {
+		tr.Emailed, tr.NotEmailedReason = s.notifyFrom(ctx, byVerified, transferMessage(addr, byEmail, title, tr.Link, tr.ExpiresAt))
 	}
 	return tr, nil
 }
@@ -656,7 +676,7 @@ func (s *Service) PublicLinkState(ctx context.Context, siteID string, by uuid.UU
 
 // SetPublicLink enables, disables, or rotates the site's public link (owner
 // only) and returns the new link for enable and rotate:
-// https://<id>.SITES_DOMAIN/_auth/share/<token>. Enabling a link that is
+// https://<id>.SITES_DOMAIN/_auth/share#token=<token>. Enabling a link that is
 // on fails with ErrPublicLinkEnabled (its token cannot be shown again;
 // rotate for a new one), rotating one that is off with
 // ErrPublicLinkDisabled; disabling one that is off is a no-op. Enable
@@ -687,7 +707,7 @@ func (s *Service) SetPublicLink(ctx context.Context, siteID string, by uuid.UUID
 	if err != nil || op == LinkDisable {
 		return "", err
 	}
-	return s.cfg.SiteOrigin(siteID) + "/_auth/share/" + plaintext, nil
+	return s.cfg.SiteOrigin(siteID) + "/_auth/share#token=" + plaintext, nil
 }
 
 // --- Helpers ----------------------------------------------------------------
@@ -701,15 +721,17 @@ func ownsAddress(ctx context.Context, q *db.Queries, user uuid.UUID, addr string
 	return err == nil, err
 }
 
-func primaryEmail(ctx context.Context, q *db.Queries, user uuid.UUID) (string, error) {
+// primaryEmail returns user's primary email and whether it is verified;
+// "" and false for an account without one.
+func primaryEmail(ctx context.Context, q *db.Queries, user uuid.UUID) (string, bool, error) {
 	es, err := q.ListUserEmails(ctx, user)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(es) > 0 && es[0].IsPrimary {
-		return es[0].Email, nil
+		return es[0].Email, es[0].Verified, nil
 	}
-	return "", nil
+	return "", false, nil
 }
 
 // normalizeEmail lowercases and validates a bare address (matches the

@@ -54,7 +54,7 @@ RETURNING *;
 
 -- name: GetAuthorizationRequest :one
 SELECT r.id, r.client_id, r.redirect_uri, r.expires_at,
-       c.client_id AS client_key, c.client_name, c.registration, c.redirect_uris
+       c.client_id AS client_key, c.client_name, c.registration
 FROM oauth_authorization_requests r
 JOIN oauth_clients c ON c.id = r.client_id
 WHERE r.token_hash = @token_hash AND r.user_id = @user_id AND r.expires_at > now();
@@ -78,14 +78,18 @@ INSERT INTO oauth_authorization_codes (id, token_hash, grant_id, redirect_uri, c
 VALUES (@id, @token_hash, @grant_id, @redirect_uri, @code_challenge, 'S256', @resource, @scopes, @expires_at)
 RETURNING *;
 
+-- ConsumeAuthorizationCode marks a code used. It runs in the transaction
+-- that issues the code's tokens, so the row stays locked until they exist.
 -- name: ConsumeAuthorizationCode :one
 UPDATE oauth_authorization_codes SET consumed_at = now()
 WHERE token_hash = @token_hash AND consumed_at IS NULL AND expires_at > now()
 RETURNING *;
 
--- GetAuthorizationCodeByHash detects reuse after a failed consume.
--- name: GetAuthorizationCodeByHash :one
-SELECT * FROM oauth_authorization_codes WHERE token_hash = @token_hash;
+-- GetAuthorizationCodeForUpdate detects reuse after a failed consume. The
+-- lock waits for an exchange still issuing tokens, so revoking the family
+-- afterwards catches them.
+-- name: GetAuthorizationCodeForUpdate :one
+SELECT * FROM oauth_authorization_codes WHERE token_hash = @token_hash FOR UPDATE;
 
 -- name: GetGrantWithClient :one
 SELECT g.id, g.user_id, g.client_id, g.scopes,
@@ -130,7 +134,7 @@ WHERE t.token_hash = @token_hash AND g.client_id = @client_id;
 -- GetAccessTokenPrincipal resolves a bearer token for /mcp.
 -- name: GetAccessTokenPrincipal :one
 SELECT t.id, t.grant_id, t.family_id, t.scopes, t.expires_at,
-       g.user_id, c.client_id AS client_key, c.client_name,
+       g.user_id, c.client_id AS client_key, c.client_name, c.registration,
        e.email, coalesce(e.verified, false)::boolean AS email_verified
 FROM oauth_access_tokens t
 JOIN oauth_grants g ON g.id = t.grant_id

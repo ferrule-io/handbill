@@ -106,58 +106,67 @@ var errServer = newError(http.StatusInternalServerError, "server_error", "Someth
 
 func invalidGrant(description string) *oauthError { return badRequest("invalid_grant", description) }
 
+// exchangeCode consumes the code and issues its tokens in one transaction,
+// so a concurrent replay, which locks the consumed code row before revoking
+// the family, waits until those tokens exist. A code that fails a check
+// below stays consumed.
 func (m *module) exchangeCode(ctx context.Context, client db.OauthClient, form url.Values) (tokenResponse, *oauthError) {
 	verifier := form.Get("code_verifier")
 	if !validVerifier(verifier) {
 		return tokenResponse{}, badRequest("invalid_request", "code_verifier is missing or malformed.")
 	}
-	q := db.New(m.d.DB)
 	hash := token.Hash(form.Get("code"))
-	code, err := q.ConsumeAuthorizationCode(ctx, hash)
-	if errors.Is(err, pgx.ErrNoRows) {
-		old, err := q.GetAuthorizationCodeByHash(ctx, hash)
-		if err == nil && old.ConsumedAt != nil {
+	var resp tokenResponse
+	var oe *oauthError
+	err := db.InTx(ctx, m.d.DB, func(q *db.Queries) error {
+		code, err := q.ConsumeAuthorizationCode(ctx, hash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			oe = invalidGrant("The authorization code is invalid, expired, or already used.")
+			old, err := q.GetAuthorizationCodeForUpdate(ctx, hash)
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && old.ConsumedAt == nil) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
 			// A replayed code may have leaked: revoke what it issued.
 			if err := m.revokeFamily(ctx, q, old.ID); err != nil {
-				return tokenResponse{}, errServer
+				return err
 			}
 			m.d.Logger.Warn("oauth: authorization code reused; token family revoked", "family_id", old.ID)
+			return nil
 		}
-		return tokenResponse{}, invalidGrant("The authorization code is invalid, expired, or already used.")
-	}
-	if err != nil {
-		m.d.Logger.Error("oauth: consume code", "err", err)
-		return tokenResponse{}, errServer
-	}
-	grant, err := q.GetGrantWithClient(ctx, code.GrantID)
-	if err != nil {
+		if err != nil {
+			return err
+		}
+		grant, err := q.GetGrantWithClient(ctx, code.GrantID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return tokenResponse{}, invalidGrant("The authorization was revoked.")
+			oe = invalidGrant("The authorization was revoked.")
+			return nil
 		}
-		m.d.Logger.Error("oauth: load grant", "err", err)
-		return tokenResponse{}, errServer
-	}
-	if grant.ClientKey != client.ClientID {
-		return tokenResponse{}, invalidGrant("The authorization code was issued to another client.")
-	}
-	if form.Get("redirect_uri") != code.RedirectUri {
-		return tokenResponse{}, invalidGrant("redirect_uri does not match the authorization request.")
-	}
-	if !verifyPKCE(verifier, code.CodeChallenge) {
-		return tokenResponse{}, invalidGrant("code_verifier does not match the code challenge.")
-	}
-	if form.Has("resource") && form.Get("resource") != code.Resource {
-		return tokenResponse{}, badRequest("invalid_target", "The resource does not match the authorization request.")
-	}
-	var resp tokenResponse
-	err = db.InTx(ctx, m.d.DB, func(tq *db.Queries) error {
-		var err error
-		resp, err = m.issue(ctx, tq, grant.ID, code.ID, uuid.NullUUID{}, code.Resource, code.Scopes, effectiveGrantTypes(grant.Metadata))
+		if err != nil {
+			return err
+		}
+		switch {
+		case grant.ClientKey != client.ClientID:
+			oe = invalidGrant("The authorization code was issued to another client.")
+		case form.Get("redirect_uri") != code.RedirectUri:
+			oe = invalidGrant("redirect_uri does not match the authorization request.")
+		case !verifyPKCE(verifier, code.CodeChallenge):
+			oe = invalidGrant("code_verifier does not match the code challenge.")
+		case form.Has("resource") && form.Get("resource") != code.Resource:
+			oe = badRequest("invalid_target", "The resource does not match the authorization request.")
+		default:
+			resp, err = m.issue(ctx, q, grant.ID, code.ID, uuid.NullUUID{}, code.Resource, code.Scopes, effectiveGrantTypes(grant.Metadata))
+		}
 		return err
 	})
 	if err != nil {
-		m.d.Logger.Error("oauth: issue tokens", "err", err)
+		m.d.Logger.Error("oauth: exchange code", "err", err)
 		return tokenResponse{}, errServer
+	}
+	if oe != nil {
+		return tokenResponse{}, oe
 	}
 	return resp, nil
 }

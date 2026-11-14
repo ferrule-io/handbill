@@ -5,15 +5,21 @@
 //     role, then issues a single-use ticket to the site host;
 //   - GET /_auth/callback on the site host redeems the ticket and sets the
 //     __Host-site cookie;
-//   - GET /_auth/share/{token} on the site host redeems the site's public
-//     link (docs/design.md#public-links) for a cookie without a user;
+//   - GET /_auth/share on the site host serves a script-only page that
+//     moves the public-link token (docs/design.md#public-links) from the
+//     fragment into POST /_auth/share, which redeems it for a cookie
+//     without a user;
 //   - every other GET on the site host is authorized from that cookie
 //     against the site's current access state and streams the requested
-//     file of the current version from storage.
+//     file of the current version from storage. Service worker scripts are
+//     refused, so site content cannot intercept /_auth/ navigations or
+//     outlive revocation in a visitor's browser.
 package siteserver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"html/template"
 	"io"
@@ -65,16 +71,26 @@ func Authorized(c token.SiteCookie, a sites.Access) bool {
 }
 
 // Register installs GET /auth/site on the app host and the file server,
-// /_auth/callback, /_auth/share/{token}, and the reserved /_auth/ namespace
-// on site hosts.
+// /_auth/callback, /_auth/share, and the reserved /_auth/ namespace on site
+// hosts.
 func Register(r *server.Routes, d *server.Deps) error {
 	h := newHandler(d)
+	if d.Config.AppOrigin.Scheme == "https" {
+		// Site hosts share the app's scheme (config.SiteOrigin).
+		r.UseSites(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+				next.ServeHTTP(w, r)
+			})
+		})
+	}
 	r.App.HandleFunc("GET /auth/site", h.handoff)
 	r.Sites.HandleFunc("GET /", h.serve)
 	// Reserved on every site host; never served from site content.
 	r.Sites.HandleFunc("GET /_auth/", h.reserved)
 	r.Sites.HandleFunc("GET /_auth/callback", h.callback)
-	r.Sites.HandleFunc("GET /_auth/share/{token}", h.share)
+	r.Sites.HandleFunc("GET /_auth/share", h.shareOpener)
+	r.Sites.HandleFunc("POST /_auth/share", h.share)
 	return nil
 }
 
@@ -107,6 +123,15 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	siteID := server.SiteID(ctx)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Browsers send "Service-Worker: script" when fetching a service
+	// worker's script. A worker registered by site content would control
+	// /_auth/ navigations (stealing tickets and public-link tokens) and keep
+	// serving cached content after its visitor's access is revoked, so no
+	// site may register one.
+	if r.Header.Get("Service-Worker") != "" {
+		plain(w, http.StatusForbidden, "Service workers are not allowed on hosted sites.\n")
+		return
+	}
 	access, ok, err := h.authorize(r, siteID)
 	if err != nil {
 		h.fail(w, r, err)
@@ -302,32 +327,76 @@ func (h *handler) callback(w http.ResponseWriter, r *http.Request) {
 	if !ValidReturnPath(ret) {
 		ret = "/"
 	}
+	clearSiteStorage(w)
 	h.setCookie(w, token.SiteCookie{SiteID: siteID, UserID: row.UserID})
 	http.Redirect(w, r, ret, http.StatusFound)
 }
 
-// share (site host) redeems this site's public link: it sets a site cookie
-// without a user, carrying the link's generation, and redirects to "/" so
-// the token leaves the address bar. Every failure (unknown token, another
-// site's link, a disabled link) gets the same neutral page.
+// clearSiteStorage asks the browser to drop the site origin's storage
+// (including any service worker registered before workers were refused)
+// whenever a site cookie is issued. "storage" leaves cookies alone, so the
+// cookie set in the same response survives.
+func clearSiteStorage(w http.ResponseWriter) {
+	w.Header().Set("Clear-Site-Data", `"storage"`)
+}
+
+// maxShareForm caps the POST /_auth/share body: one token field.
+const maxShareForm = 1 << 10
+
+// shareOpener (site host) answers the public link,
+// /_auth/share#token=<token>. The token travels in the fragment so it never
+// reaches server, proxy, or CDN logs; this page's only script moves it into
+// a same-origin POST /_auth/share and clears it from the address bar.
+func (h *handler) shareOpener(w http.ResponseWriter, r *http.Request) {
+	hdr := w.Header()
+	hdr.Set("Content-Type", "text/html; charset=utf-8")
+	hdr.Set("Content-Security-Policy", shareOpenerCSP)
+	hdr.Set("Referrer-Policy", "no-referrer")
+	hdr.Set("X-Content-Type-Options", "nosniff")
+	hdr.Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = io.WriteString(w, shareOpenerPage)
+	}
+}
+
+// share (site host) redeems this site's public link from the opener page's
+// form: it sets a site cookie without a user, carrying the link's
+// generation, and redirects to "/". Every failure (missing or unknown
+// token, another site's link, a disabled link) gets the same neutral page.
+// It needs no Origin check: forcing a browser to redeem a link only gives
+// it the anonymous access the link grants.
 func (h *handler) share(w http.ResponseWriter, r *http.Request) {
 	siteID := server.SiteID(r.Context())
 	hdr := w.Header()
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("Referrer-Policy", "no-referrer")
 	hdr.Set("X-Content-Type-Options", "nosniff")
-	link, err := db.New(h.deps.DB).GetPublicLinkByToken(r.Context(), token.Hash(r.PathValue("token")))
+	r.Body = http.MaxBytesReader(w, r.Body, maxShareForm)
+	var tok string
+	if err := r.ParseForm(); err == nil {
+		tok = r.PostForm.Get("token")
+	}
+	inactive := func() {
+		page(w, http.StatusNotFound, "This link isn’t active",
+			"It may have been turned off or replaced with a new one. Ask the person who shared it for the current link.", "")
+	}
+	if tok == "" {
+		inactive()
+		return
+	}
+	link, err := db.New(h.deps.DB).GetPublicLinkByToken(r.Context(), token.Hash(tok))
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, err)
 		return
 	}
 	if err != nil || link.SiteID != siteID || !link.Enabled {
-		page(w, http.StatusNotFound, "This link isn’t active",
-			"It may have been turned off or replaced with a new one. Ask the person who shared it for the current link.", "")
+		inactive()
 		return
 	}
+	clearSiteStorage(w)
 	h.setCookie(w, token.SiteCookie{SiteID: siteID, LinkGen: link.Generation})
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // setCookie issues the site cookie for c, expiring CookieTTL from now.
@@ -367,12 +436,14 @@ func plain(w http.ResponseWriter, status int, body string) {
 	_, _ = io.WriteString(w, body)
 }
 
-var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
+// pageHead is the shared head of the site host's own pages up to the title.
+const pageHead = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{{.Title}} · handbill</title>
-<style>
+`
+
+const pageStyle = `<style>
 :root{--bg:#f7f5f0;--fg:#1d1b18;--muted:#6b665d;--card:#fffdf9;--ring:#e4dfd4;--accent:#c2410c}
 @media (prefers-color-scheme:dark){:root{--bg:#141311;--fg:#ece8e1;--muted:#9c968c;--card:#1c1a17;--ring:#2e2b26;--accent:#fb923c}}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);
@@ -381,10 +452,39 @@ main{max-width:26rem;width:100%;background:var(--card);border:1px solid var(--ri
 p.eyebrow{margin:0 0 .5rem;font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
 h1{margin:0 0 .5rem;font-size:1.35rem;line-height:1.25;font-weight:600}p{margin:0;color:var(--muted)}
 a{display:inline-block;margin-top:1.25rem;color:var(--fg);font-weight:600;text-underline-offset:3px}
-</style></head><body><main>
+</style>`
+
+var pageTmpl = template.Must(template.New("page").Parse(pageHead + `<title>{{.Title}} · handbill</title>
+` + pageStyle + `</head><body><main>
 <p class="eyebrow">handbill</p><h1>{{.Title}}</h1><p>{{.Message}}</p>
 {{if .Link}}<a href="{{.Link}}">Try again</a>{{end}}
 </main></body></html>`))
+
+// shareOpenerScript reads the token from the fragment, removes it from the
+// address bar and history, and posts it to /_auth/share.
+const shareOpenerScript = `(function(){var t=new URLSearchParams(location.hash.slice(1)).get("token");` +
+	`history.replaceState(null,"",location.pathname+location.search);` +
+	`if(!t){document.getElementById("msg").textContent="This link is incomplete. Open the whole link you were sent.";return}` +
+	`var f=document.getElementById("share");f.elements.token.value=t;f.submit()})()`
+
+var (
+	shareOpenerPage = pageHead + "<title>Opening site · handbill</title>\n" + pageStyle + `</head><body><main>
+<p class="eyebrow">handbill</p><h1>Opening site</h1><p id="msg">One moment…</p>
+<noscript><p>Turn on JavaScript to open this link.</p></noscript>
+<form id="share" method="post" action="/_auth/share"><input type="hidden" name="token"></form>
+<script>` + shareOpenerScript + `</script>
+</main></body></html>`
+	// shareOpenerCSP allows exactly the opener's inline script and a form
+	// post to this origin.
+	shareOpenerCSP = "default-src 'none'; script-src " + scriptHash(shareOpenerScript) +
+		"; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+)
+
+// scriptHash is a CSP hash source for an inline script's exact text.
+func scriptHash(script string) string {
+	sum := sha256.Sum256([]byte(script))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
 
 // page renders a small self-contained HTML message (no scripts, no
 // external resources).

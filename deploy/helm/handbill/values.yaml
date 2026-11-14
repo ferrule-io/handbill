@@ -126,8 +126,9 @@ externalDatabase:
   user: ""
   # Database password (if not using existingSecret)
   password: ""
-  # SSL mode: disable, require, verify-ca, verify-full, prefer
-  sslmode: "prefer"
+  # SSL mode: verify-full (default; checks the server certificate against the
+  # system roots or PGSSLROOTCERT), verify-ca, require, prefer, disable
+  sslmode: "verify-full"
   # Existing secret containing database credentials or a full DSN
   existingSecret: ""
   # Key within existingSecret containing the database password

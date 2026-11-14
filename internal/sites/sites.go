@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -53,13 +54,14 @@ func inputErrorf(format string, args ...any) error {
 
 // Service is stateless over the pool and store; construct one per module.
 type Service struct {
-	db    *pgxpool.Pool
-	store storage.Store
+	db     *pgxpool.Pool
+	store  storage.Store
+	logger *slog.Logger
 }
 
 // NewService returns a Service over d.DB and d.Storage.
 func NewService(d *server.Deps) *Service {
-	return &Service{db: d.DB, store: d.Storage}
+	return &Service{db: d.DB, store: d.Storage, logger: d.Logger}
 }
 
 // Site is a site's metadata.

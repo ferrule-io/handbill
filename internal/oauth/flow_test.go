@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -282,38 +283,46 @@ func TestAuthorizeValidation(t *testing.T) {
 		t.Fatalf("repeated client_id: %q", got)
 	}
 
-	redirected := func(mod func(url.Values), wantErr string, wantState bool) {
-		t.Helper()
-		p := f.params()
-		mod(p)
-		res := h.authorize(p)
-		loc, _ := url.Parse(res.Header.Get("Location"))
-		q := loc.Query()
-		if res.StatusCode != 302 || !strings.HasPrefix(loc.String(), "http://127.0.0.1:5555/callback?") || q.Get("error") != wantErr || q.Get("iss") != h.srv.URL {
-			t.Fatalf("%s: %d %s", wantErr, res.StatusCode, loc)
-		}
-		if q.Has("state") != wantState || (wantState && q.Get("state") != "s1") {
-			t.Fatalf("%s: state %q", wantErr, q["state"])
-		}
-	}
-	redirected(func(p url.Values) { p.Del("code_challenge") }, "invalid_request", true)
-	redirected(func(p url.Values) { p.Set("code_challenge_method", "plain") }, "invalid_request", true)
-	redirected(func(p url.Values) { p.Del("code_challenge_method") }, "invalid_request", true)
-	redirected(func(p url.Values) { p.Set("code_challenge", strings.Repeat("a", 42)) }, "invalid_request", true)
-	redirected(func(p url.Values) { p.Set("response_type", "token") }, "unsupported_response_type", true)
-	redirected(func(p url.Values) { p.Set("resource", "https://evil/mcp") }, "invalid_target", true)
-	redirected(func(p url.Values) { p["scope"] = []string{"a", "b"} }, "invalid_request", true)
-	redirected(func(p url.Values) { p.Set("state", strings.Repeat("s", 1025)) }, "invalid_request", false)
-	redirected(func(p url.Values) { p.Set("request_uri", "urn:x") }, "request_not_supported", true)
-	redirected(func(p url.Values) { p.Set("response_mode", "fragment") }, "invalid_request", true)
-
 	// The resource is matched after lowercasing scheme and host.
 	p := f.params()
 	p.Set("resource", strings.ToUpper(h.srv.URL[:8])+h.srv.URL[8:]+"/mcp")
 	requestHandle(t, h.authorize(p))
 
+	// Every other error before the consent decision also shows the error
+	// card, signed in or out: an untrusted redirect URI is never followed
+	// automatically (RFC 9700 §4.11.1).
+	cases := []struct {
+		mod  func(url.Values)
+		want string
+	}{
+		{func(p url.Values) { p.Del("code_challenge") }, "invalid_request"},
+		{func(p url.Values) { p.Set("code_challenge_method", "plain") }, "invalid_request"},
+		{func(p url.Values) { p.Del("code_challenge_method") }, "invalid_request"},
+		{func(p url.Values) { p.Set("code_challenge", strings.Repeat("a", 42)) }, "invalid_request"},
+		{func(p url.Values) { p.Set("response_type", "token") }, "unsupported_response_type"},
+		{func(p url.Values) { p.Del("response_type") }, "unsupported_response_type"},
+		{func(p url.Values) { p.Set("resource", "https://evil/mcp") }, "invalid_target"},
+		{func(p url.Values) { p["scope"] = []string{"a", "b"} }, "invalid_request"},
+		{func(p url.Values) { p.Set("state", strings.Repeat("s", 1025)) }, "invalid_request"},
+		{func(p url.Values) { p["state"] = []string{"s1", "s2"} }, "invalid_request"},
+		{func(p url.Values) { p.Set("request_uri", "urn:x") }, "request_not_supported"},
+		{func(p url.Values) { p.Set("response_mode", "fragment") }, "invalid_request"},
+	}
+	for _, signedIn := range []bool{true, false} {
+		if !signedIn {
+			h.signOut()
+		}
+		for _, c := range cases {
+			p := f.params()
+			c.mod(p)
+			res := h.authorize(p)
+			if got := consentError(res); got != c.want {
+				t.Fatalf("signed in %v, %s: %d %q, want %q", signedIn, p.Encode(), res.StatusCode, res.Header.Get("Location"), c.want)
+			}
+		}
+	}
+
 	// Signed out: sign in first, then come back.
-	h.signOut()
 	res := h.authorize(f.params())
 	loc := res.Header.Get("Location")
 	if res.StatusCode != 303 || !strings.HasPrefix(loc, "/login?return=%2Foauth%2Fauthorize%3F") {
@@ -486,6 +495,79 @@ func TestTokenExchange(t *testing.T) {
 	}
 }
 
+// Concurrent exchanges of one code: at most one succeeds, and the replay
+// revokes whatever the winner was issued, even when it races the issue.
+func TestTokenExchangeConcurrentReplay(t *testing.T) {
+	h := newHarness(t, withMCP())
+	h.signIn("a@example.com")
+	f := h.newCIMDClient("/client")
+	const racers = 4
+	for i := range 15 {
+		code := h.code(f)
+		v := url.Values{
+			"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {f.redirectURI},
+			"code_verifier": {f.verifier}, "client_id": {f.clientID},
+		}.Encode()
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		results := make([]struct {
+			status int
+			tk     tokens
+			err    error
+		}, racers)
+		for j := range racers {
+			wg.Go(func() {
+				<-start
+				req, _ := http.NewRequest("POST", h.srv.URL+"/oauth/token", strings.NewReader(v))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				res, err := h.srv.Client().Do(req)
+				if err != nil {
+					results[j].err = err
+					return
+				}
+				defer res.Body.Close()
+				results[j].status = res.StatusCode
+				results[j].err = json.NewDecoder(res.Body).Decode(&results[j].tk)
+			})
+		}
+		close(start)
+		wg.Wait()
+		var won []tokens
+		for _, r := range results {
+			switch {
+			case r.err != nil:
+				t.Fatal(r.err)
+			case r.status == 200:
+				won = append(won, r.tk)
+			case r.status != 400 || r.tk.Error != "invalid_grant":
+				t.Fatalf("round %d: %d %q", i, r.status, r.tk.Error)
+			}
+		}
+		if len(won) > 1 {
+			t.Fatalf("round %d: %d exchanges succeeded", i, len(won))
+		}
+		var live int
+		if err := h.d.DB.QueryRow(t.Context(), `
+			SELECT (SELECT count(*) FROM oauth_access_tokens t JOIN oauth_authorization_codes c ON c.id = t.family_id
+			        WHERE c.token_hash = sha256($1::text::bytea) AND t.revoked_at IS NULL)
+			     + (SELECT count(*) FROM oauth_refresh_tokens t JOIN oauth_authorization_codes c ON c.id = t.family_id
+			        WHERE c.token_hash = sha256($1::text::bytea) AND t.revoked_at IS NULL)`, code).Scan(&live); err != nil {
+			t.Fatal(err)
+		}
+		if live != 0 {
+			t.Fatalf("round %d: %d tokens survived the replay", i, live)
+		}
+		for _, tk := range won {
+			if res := h.bearer(tk.AccessToken); res.StatusCode != 401 {
+				t.Fatalf("round %d: access token after replay: %d", i, res.StatusCode)
+			}
+			if status, e := h.refresh(f, tk.RefreshToken); status != 400 || e.Error != "invalid_grant" {
+				t.Fatalf("round %d: refresh token after replay: %d %q", i, status, e.Error)
+			}
+		}
+	}
+}
+
 func TestRefresh(t *testing.T) {
 	h := newHarness(t, withMCP())
 	h.signIn("a@example.com")
@@ -616,7 +698,9 @@ func TestDCR(t *testing.T) {
 			t.Errorf("%s: %d %q, want %q", body, res.StatusCode, e.Error, want)
 		}
 	}
-	res = h.do(jsonReq(t, h.srv.URL+"/oauth/register", `{"redirect_uris":["http://127.0.0.1/callback"],"client_name":"Dyn"}`))
+	// A DCR client may register any https redirect URI, so it is shown by
+	// the one it actually requests, and format characters leave its name.
+	res = h.do(jsonReq(t, h.srv.URL+"/oauth/register", `{"redirect_uris":["https://claude.ai/api/mcp/auth_callback","http://127.0.0.1/callback"],"client_name":"\u202eDyn\u200b\u2066"}`))
 	var reg struct {
 		ClientID   string   `json:"client_id"`
 		GrantTypes []string `json:"grant_types"`
@@ -632,29 +716,42 @@ func TestDCR(t *testing.T) {
 	var got struct {
 		Request struct {
 			Client struct {
+				Name     string
 				Host     string
 				Verified bool
 			}
 		}
 	}
 	decode(t, h.get("/app-api/oauth/consent?request="+url.QueryEscape(handle)), &got)
-	if got.Request.Client.Verified || got.Request.Client.Host != "127.0.0.1" {
+	if got.Request.Client.Verified || got.Request.Client.Host != "127.0.0.1:5555" || got.Request.Client.Name != "Dyn" {
 		t.Fatalf("DCR consent client: %+v", got.Request.Client)
 	}
 	code := h.approve(handle).Get("code")
 
 	// Turning DCR off afterwards.
 	h.d.Config.OAuthDCREnabled = false
-	res = h.authorize(f.params())
-	if loc, _ := url.Parse(res.Header.Get("Location")); res.StatusCode != 302 || loc.Query().Get("error") != "unauthorized_client" {
-		t.Fatalf("authorize with DCR off: %d %s", res.StatusCode, res.Header.Get("Location"))
+	if got := consentError(h.authorize(f.params())); got != "unauthorized_client" {
+		t.Fatalf("authorize with DCR off: %q", got)
 	}
 	if status, e := h.exchange(f, code); status != 401 || e.Error != "invalid_client" {
 		t.Fatalf("token with DCR off: %d %q", status, e.Error)
 	}
 	h.d.Config.OAuthDCREnabled = true
-	if status, _ := h.exchange(f, code); status != 200 {
+	status, tk := h.exchange(f, code)
+	if status != 200 {
 		t.Fatalf("token with DCR on: %d", status)
+	}
+	if res := h.bearer(tk.AccessToken); res.StatusCode != 200 {
+		t.Fatalf("bearer with DCR on: %d", res.StatusCode)
+	}
+	// Tokens already issued stop working while DCR is off.
+	h.d.Config.OAuthDCREnabled = false
+	if res := h.bearer(tk.AccessToken); res.StatusCode != 401 {
+		t.Fatalf("bearer with DCR off: %d", res.StatusCode)
+	}
+	h.d.Config.OAuthDCREnabled = true
+	if res := h.bearer(tk.AccessToken); res.StatusCode != 200 {
+		t.Fatalf("bearer with DCR back on: %d", res.StatusCode)
 	}
 }
 

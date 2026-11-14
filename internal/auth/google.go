@@ -258,8 +258,12 @@ func (m *module) googleSignIn(ctx context.Context, w http.ResponseWriter, r *htt
 
 		// A new Google account creates a new handbill account; linking
 		// to an existing one only happens from settings. An address that
-		// another account has verified stays with it.
-		if c.Email != "" {
+		// another account has verified stays with it. An unverified address
+		// already claimed by maxUnverifiedEmailClaims accounts is left off:
+		// the account starts without an email, and gets it once Google
+		// reports it verified (the returning sign-in above).
+		claim := c.Email != ""
+		if claim {
 			if _, err := q.GetVerifiedEmailHolder(ctx, c.Email); err == nil {
 				code = "email_in_use"
 				return nil
@@ -267,11 +271,18 @@ func (m *module) googleSignIn(ctx context.Context, w http.ResponseWriter, r *htt
 				return err
 			}
 		}
+		if claim && !c.EmailVerified {
+			full, err := claimCapReached(ctx, q, c.Email)
+			if err != nil {
+				return err
+			}
+			claim = !full
+		}
 		userID := newID()
 		if _, err := q.CreateUser(ctx, userID); err != nil {
 			return err
 		}
-		if c.Email != "" {
+		if claim {
 			e, err := q.CreateEmail(ctx, db.CreateEmailParams{ID: newID(), UserID: userID, Email: c.Email, IsPrimary: true})
 			if err != nil {
 				return err

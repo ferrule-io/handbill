@@ -27,6 +27,19 @@ func (q *Queries) ConsumeEmailVerification(ctx context.Context, tokenHash []byte
 	return email_id, err
 }
 
+const countUnverifiedEmailClaims = `-- name: CountUnverifiedEmailClaims :one
+SELECT count(*) FROM emails WHERE email = $1 AND NOT verified
+`
+
+// CountUnverifiedEmailClaims counts the accounts claiming an address
+// unverified, for the per-address cap (docs/design.md#accounts).
+func (q *Queries) CountUnverifiedEmailClaims(ctx context.Context, email string) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnverifiedEmailClaims, email)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEmail = `-- name: CreateEmail :one
 INSERT INTO emails (id, user_id, email, is_primary)
 VALUES ($1, $2, $3, $4)

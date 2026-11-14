@@ -193,17 +193,24 @@ func (q *Queries) CreatePasskey(ctx context.Context, arg CreatePasskeyParams) (P
 }
 
 const createRecoveryCode = `-- name: CreateRecoveryCode :exec
-INSERT INTO recovery_codes (id, user_id, code_hash) VALUES ($1, $2, $3)
+INSERT INTO recovery_codes (id, user_id, code_hash, lookup_hash)
+VALUES ($1, $2, $3, $4)
 `
 
 type CreateRecoveryCodeParams struct {
-	ID       uuid.UUID
-	UserID   uuid.UUID
-	CodeHash string
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	CodeHash   string
+	LookupHash []byte
 }
 
 func (q *Queries) CreateRecoveryCode(ctx context.Context, arg CreateRecoveryCodeParams) error {
-	_, err := q.db.Exec(ctx, createRecoveryCode, arg.ID, arg.UserID, arg.CodeHash)
+	_, err := q.db.Exec(ctx, createRecoveryCode,
+		arg.ID,
+		arg.UserID,
+		arg.CodeHash,
+		arg.LookupHash,
+	)
 	return err
 }
 
@@ -414,6 +421,32 @@ func (q *Queries) GetPasskeyByCredentialID(ctx context.Context, credentialID []b
 	return i, err
 }
 
+const getRecoveryCodeForSignIn = `-- name: GetRecoveryCodeForSignIn :one
+SELECT r.id, r.user_id, r.code_hash FROM recovery_codes r
+WHERE r.lookup_hash = $1 AND r.consumed_at IS NULL
+  AND EXISTS (SELECT 1 FROM emails e WHERE e.user_id = r.user_id AND e.email = $2)
+`
+
+type GetRecoveryCodeForSignInParams struct {
+	LookupHash []byte
+	Email      string
+}
+
+type GetRecoveryCodeForSignInRow struct {
+	ID       uuid.UUID
+	UserID   uuid.UUID
+	CodeHash string
+}
+
+// GetRecoveryCodeForSignIn returns the unused code with lookup_hash when
+// its account claims email (verified or not); no row otherwise.
+func (q *Queries) GetRecoveryCodeForSignIn(ctx context.Context, arg GetRecoveryCodeForSignInParams) (GetRecoveryCodeForSignInRow, error) {
+	row := q.db.QueryRow(ctx, getRecoveryCodeForSignIn, arg.LookupHash, arg.Email)
+	var i GetRecoveryCodeForSignInRow
+	err := row.Scan(&i.ID, &i.UserID, &i.CodeHash)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT s.id, s.user_id, s.created_at, s.last_seen_at, s.expires_at, s.restricted,
        e.email AS email, e.verified AS email_verified
@@ -517,37 +550,6 @@ func (q *Queries) ListSessions(ctx context.Context, userID uuid.UUID) ([]Session
 			&i.ExpiresAt,
 			&i.Restricted,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUnusedRecoveryCodes = `-- name: ListUnusedRecoveryCodes :many
-SELECT id, code_hash FROM recovery_codes
-WHERE user_id = $1 AND consumed_at IS NULL
-ORDER BY id
-`
-
-type ListUnusedRecoveryCodesRow struct {
-	ID       uuid.UUID
-	CodeHash string
-}
-
-func (q *Queries) ListUnusedRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]ListUnusedRecoveryCodesRow, error) {
-	rows, err := q.db.Query(ctx, listUnusedRecoveryCodes, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUnusedRecoveryCodesRow
-	for rows.Next() {
-		var i ListUnusedRecoveryCodesRow
-		if err := rows.Scan(&i.ID, &i.CodeHash); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

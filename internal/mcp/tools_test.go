@@ -150,7 +150,8 @@ func TestListTools(t *testing.T) {
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools = %v", names)
 	}
-	readOnly := map[string]bool{"whoami": true, "list_sites": true, "get_site": true, "get_upload_url": true, "list_files": true, "read_file": true, "list_versions": true, "list_members": true}
+	// get_upload_url is not read-only: it mints a bearer-equivalent URL.
+	readOnly := map[string]bool{"whoami": true, "list_sites": true, "get_site": true, "list_files": true, "read_file": true, "list_versions": true, "list_members": true}
 	destructive := map[string]bool{"delete_site": true, "publish_site": true, "finalize_deployment": true,
 		"revoke_access": true, "set_public_link": true, "transfer_ownership": true}
 	idempotent := map[string]bool{"update_site": true, "upload_files": true, "rollback_site": true, "set_member_role": true}
@@ -320,4 +321,30 @@ func TestStagedDeployment(t *testing.T) {
 	fails(t, r.manager, "upload_files", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID, "files": []map[string]any{{"path": "a", "content": "a"}}}, "already finalized")
 	fails(t, r.viewer, "create_deployment", map[string]any{"site": r.site, "mode": "merge"}, "create_deployment needs manager")
 	fails(t, r.manager, "finalize_deployment", map[string]any{"site": r.site, "deployment_id": uuid.NewString()}, "was not found on site")
+}
+
+// Only a deployment's creator may add to, upload into, or finalize it;
+// other managers and the owner are refused.
+func TestDeploymentBoundToCreator(t *testing.T) {
+	e := newToolEnv(t)
+	r := e.roles()
+	second := sitestest.User(t, e.d, "second@example.com")
+	sitestest.Member(t, e.d, r.site, second, "manager")
+	other := e.session(second, "second@example.com")
+
+	dep := ok[createDeploymentOut](t, r.manager, "create_deployment", map[string]any{"site": r.site, "mode": "replace"})
+	ok[uploadFilesOut](t, r.manager, "upload_files", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID, "files": []map[string]any{{"path": "index.html", "content": "mine"}}})
+	notYours := "deployment " + dep.DeploymentID + " was created by another account"
+	for _, cs := range []*mcpsdk.ClientSession{other, r.owner} {
+		fails(t, cs, "upload_files", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID, "files": []map[string]any{{"path": "index.html", "content": "theirs"}}}, notYours)
+		fails(t, cs, "get_upload_url", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID}, notYours)
+		fails(t, cs, "finalize_deployment", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID}, notYours)
+	}
+
+	ok[publishOut](t, r.manager, "finalize_deployment", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID})
+	got := ok[readFileOut](t, r.owner, "read_file", map[string]any{"site": r.site, "path": "index.html"})
+	lv := ok[listVersionsOut](t, r.owner, "list_versions", map[string]any{"site": r.site})
+	if got.Content != "mine" || len(lv.Versions) != 1 || lv.Versions[0].PublishedBy == nil || *lv.Versions[0].PublishedBy != "manager@example.com" {
+		t.Fatalf("published %q by %+v", got.Content, lv.Versions)
+	}
 }

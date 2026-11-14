@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
+
+	"github.com/ferrule-io/handbill/internal/db"
 	"github.com/ferrule-io/handbill/internal/mail"
 	"github.com/ferrule-io/handbill/internal/sites/sitestest"
 )
@@ -116,7 +119,7 @@ func TestPublicLinkAndTransfer(t *testing.T) {
 	op := func(o string) map[string]any { return map[string]any{"site": r.site, "op": o} }
 	fails(t, r.manager, "set_public_link", op("enable"), "set_public_link needs owner")
 	on := ok[publicLinkOut](t, r.owner, "set_public_link", op("enable"))
-	if on.Link == nil || !strings.Contains(*on.Link, "/_auth/share/") || !strings.Contains(on.Note, "shown only now") {
+	if on.Link == nil || !strings.Contains(*on.Link, "/_auth/share#token=") || !strings.Contains(on.Note, "shown only now") {
 		t.Fatalf("enable = %+v", on)
 	}
 	fails(t, r.owner, "set_public_link", op("enable"), "use op rotate")
@@ -161,5 +164,42 @@ func TestPublishNotify(t *testing.T) {
 	off := ok[publishOut](t, r.manager, "publish_site", map[string]any{"site": r.site, "mode": "replace", "files": files, "notify": true})
 	if !strings.Contains(off.NotifyResult, "no email configured") || e.mail.count() != 2 {
 		t.Fatalf("no smtp notify = %q", off.NotifyResult)
+	}
+}
+
+// An account whose address is unverified gets its links but no mail goes
+// out in its name; the results say why, and list_members shows who is
+// verified.
+func TestUnverifiedSenderTools(t *testing.T) {
+	e := newToolEnv(t)
+	r := e.roles()
+	q := db.New(e.d.DB)
+	u, err := q.CreateUser(t.Context(), uuid.Must(uuid.NewV7()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.CreateEmail(t.Context(), db.CreateEmailParams{ID: uuid.Must(uuid.NewV7()), UserID: u.ID, Email: "unverified@example.com", IsPrimary: true}); err != nil {
+		t.Fatal(err)
+	}
+	sitestest.Member(t, e.d, r.site, u.ID, "manager")
+	cs := e.session(u.ID, "unverified@example.com")
+
+	sh := ok[shareOut](t, cs, "share_site", map[string]any{"site": r.site, "email": "guest@example.org", "role": "viewer", "notify": true})
+	if sh.InviteLink == "" || sh.Emailed || sh.EmailNotSentReason != "sender_unverified" || !strings.Contains(sh.Note, "not verified") || e.mail.count() != 0 {
+		t.Fatalf("share_site = %+v, sent %d", sh, e.mail.count())
+	}
+	files := []map[string]any{{"path": "index.html", "content": "<h1>hi</h1>"}}
+	pub := ok[publishOut](t, cs, "publish_site", map[string]any{"site": r.site, "mode": "replace", "files": files, "notify": true})
+	if !strings.Contains(pub.NotifyResult, "not sent: your email address is not verified") || e.mail.count() != 0 {
+		t.Fatalf("publish notify = %q, sent %d", pub.NotifyResult, e.mail.count())
+	}
+
+	list := ok[listMembersOut](t, r.owner, "list_members", map[string]any{"site": r.site})
+	verified := map[string]bool{}
+	for _, m := range list.Members {
+		verified[m.UserID] = m.EmailVerified
+	}
+	if len(list.Members) != 4 || verified[u.ID.String()] || !verified[list.Members[0].UserID] {
+		t.Fatalf("members = %+v", list.Members)
 	}
 }

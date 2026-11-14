@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -98,6 +99,34 @@ func (a *httpEnv) get(rawURL string, c *http.Cookie) *httptest.ResponseRecorder 
 	return rec
 }
 
+// redeem posts a public-link token to a site host's /_auth/share, as the
+// opener page's script does.
+func (a *httpEnv) redeem(site, tok string) *httptest.ResponseRecorder {
+	a.t.Helper()
+	req := httptest.NewRequest("POST", siteURL(site, "/_auth/share"), strings.NewReader(url.Values{"token": {tok}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	a.h.ServeHTTP(rec, req)
+	return rec
+}
+
+// open follows a public link like a browser: the token is in the fragment,
+// the server sees only GET /_auth/share (the opener page), and the page
+// posts the token.
+func (a *httpEnv) open(link string) *httptest.ResponseRecorder {
+	a.t.Helper()
+	u, err := url.Parse(link)
+	if err != nil || u.Path != "/_auth/share" || u.RawQuery != "" {
+		a.t.Fatalf("public link %q is not <site>/_auth/share#token=…", link)
+	}
+	frag, _ := url.ParseQuery(u.Fragment)
+	opener := a.get(u.Scheme+"://"+u.Host+u.Path, nil)
+	if opener.Code != http.StatusOK || !strings.Contains(opener.Body.String(), `action="/_auth/share"`) {
+		a.t.Fatalf("opener page: %d %q", opener.Code, opener.Body)
+	}
+	return a.redeem(strings.Split(u.Hostname(), ".")[0], frag.Get("token"))
+}
+
 func siteURL(id, path string) string {
 	return "http://" + id + "." + sitestest.SitesDomain + ":8084" + path
 }
@@ -138,11 +167,12 @@ func TestShareRoute(t *testing.T) {
 	// Without a cookie the site sends visitors to sign in.
 	wantRedirectToHandoff(t, a.get(siteURL(site, "/"), nil))
 
-	rec := a.get(link, nil)
-	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/" {
+	rec := a.open(link)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
 		t.Fatalf("share: %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-	if rec.Header().Get("Referrer-Policy") != "no-referrer" || rec.Header().Get("Cache-Control") != "no-store" {
+	if rec.Header().Get("Referrer-Policy") != "no-referrer" || rec.Header().Get("Cache-Control") != "no-store" ||
+		rec.Header().Get("Clear-Site-Data") != `"storage"` {
 		t.Fatalf("share headers: %v", rec.Header())
 	}
 	c := siteCookie(t, rec)
@@ -162,10 +192,10 @@ func TestShareRoute(t *testing.T) {
 	rotated, err := a.svc.SetPublicLink(ctx, site, a.owner, sharing.LinkRotate)
 	wantErr(t, err, nil)
 	wantRedirectToHandoff(t, a.get(siteURL(site, "/"), c))
-	if rec := a.get(link, nil); rec.Code != http.StatusNotFound || len(rec.Result().Cookies()) != 0 {
+	if rec := a.open(link); rec.Code != http.StatusNotFound || len(rec.Result().Cookies()) != 0 {
 		t.Fatalf("old link: %d", rec.Code)
 	}
-	c2 := siteCookie(t, a.get(rotated, nil))
+	c2 := siteCookie(t, a.open(rotated))
 	if rec := a.get(siteURL(site, "/"), c2); rec.Code != http.StatusOK {
 		t.Fatalf("rotated cookie: %d", rec.Code)
 	}
@@ -174,14 +204,14 @@ func TestShareRoute(t *testing.T) {
 	_, err = a.svc.SetPublicLink(ctx, site, a.owner, sharing.LinkDisable)
 	wantErr(t, err, nil)
 	wantRedirectToHandoff(t, a.get(siteURL(site, "/"), c2))
-	if rec := a.get(rotated, nil); rec.Code != http.StatusNotFound {
+	if rec := a.open(rotated); rec.Code != http.StatusNotFound {
 		t.Fatalf("disabled link: %d", rec.Code)
 	}
 	// Re-enabling issues a new generation: earlier cookies stay refused.
 	again, err := a.svc.SetPublicLink(ctx, site, a.owner, sharing.LinkEnable)
 	wantErr(t, err, nil)
 	wantRedirectToHandoff(t, a.get(siteURL(site, "/"), c2))
-	if rec := a.get(siteURL(site, "/"), siteCookie(t, a.get(again, nil))); rec.Code != http.StatusOK {
+	if rec := a.get(siteURL(site, "/"), siteCookie(t, a.open(again))); rec.Code != http.StatusOK {
 		t.Fatalf("re-enabled: %d", rec.Code)
 	}
 
@@ -191,15 +221,22 @@ func TestShareRoute(t *testing.T) {
 	otherLink, err := a.svc.SetPublicLink(ctx, other, a.owner, sharing.LinkEnable)
 	wantErr(t, err, nil)
 	tok := tokenOf(t, otherLink)
-	rec = a.get(siteURL(site, "/_auth/share/"+tok), nil)
+	rec = a.redeem(site, tok)
 	if rec.Code != http.StatusNotFound || len(rec.Result().Cookies()) != 0 || !strings.Contains(rec.Body.String(), "isn’t active") {
 		t.Fatalf("cross-site token: %d %q", rec.Code, rec.Body)
 	}
-	if rec := a.get(siteURL(site, "/_auth/share/garbage"), nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("garbage token: %d", rec.Code)
+	for _, tok := range []string{"garbage", ""} {
+		if rec := a.redeem(site, tok); rec.Code != http.StatusNotFound || len(rec.Result().Cookies()) != 0 {
+			t.Fatalf("token %q: %d", tok, rec.Code)
+		}
+	}
+	// The token never travels in a path: the old /_auth/share/<token> form
+	// is just a reserved path.
+	if rec := a.get(siteURL(other, "/_auth/share/"+tok), nil); rec.Code != http.StatusNotFound || len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("token in path: %d", rec.Code)
 	}
 	// A public cookie for one site is no good on another.
-	if rec := a.get(siteURL(site, "/"), siteCookie(t, a.get(otherLink, nil))); rec.Code != http.StatusFound {
+	if rec := a.get(siteURL(site, "/"), siteCookie(t, a.open(otherLink))); rec.Code != http.StatusFound {
 		t.Fatalf("other site's cookie: %d", rec.Code)
 	}
 }
@@ -334,21 +371,31 @@ func TestInvitePageEndpoints(t *testing.T) {
 		t.Fatalf("invite: %d %s", rec.Code, rec.Body)
 	}
 	var inv struct {
-		Link    string
-		Granted bool
-		Emailed bool
+		Link               string
+		Granted            bool
+		Emailed            bool
+		EmailNotSentReason *string
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &inv)
 	// No SMTP in this server: the link is returned, nothing is sent.
-	if inv.Granted || inv.Emailed || !strings.Contains(inv.Link, "/invite#token=") {
-		t.Fatalf("invite = %+v", inv)
+	if inv.Granted || inv.Emailed || !strings.Contains(inv.Link, "/invite#token=") ||
+		inv.EmailNotSentReason == nil || *inv.EmailNotSentReason != "mail_disabled" {
+		t.Fatalf("invite = %s", rec.Body)
 	}
 	tok := tokenOf(t, inv.Link)
 
-	// The member list shows the invite but never its token.
+	// The member list shows the invite but never its token, and whether
+	// each member's address is verified.
 	rec = a.call(a.owner, "GET", "/app-api/sites/"+site+"/members", "")
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), tok) || !strings.Contains(rec.Body.String(), "pal@example.com") {
 		t.Fatalf("members: %d %s", rec.Code, rec.Body)
+	}
+	var list struct {
+		Members []struct{ EmailVerified *bool }
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list.Members) != 1 || list.Members[0].EmailVerified == nil || !*list.Members[0].EmailVerified {
+		t.Fatalf("members emailVerified: %s", rec.Body)
 	}
 
 	// Signed out: lookup works, accept needs a session.

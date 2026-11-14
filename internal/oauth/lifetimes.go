@@ -24,7 +24,7 @@ const (
 	maxFormBytes      = 16 << 10
 	maxCIMDBytes      = 5 << 10
 	maxRedirectURIs   = 20
-	maxClientNameLen  = 100 // runes, after removing control characters
+	maxClientNameLen  = 100 // runes, after removing control and format characters
 )
 
 // offlineAccess is the only scope recorded; it has no effect.

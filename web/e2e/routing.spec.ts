@@ -118,3 +118,39 @@ test("site hosts do not serve the UI", async ({ request, baseURL }) => {
     expect(reserved.status()).toBe(404)
   }
 })
+
+test("every page runs under its CSP without violations", async ({ page }) => {
+  // The CSP allows only each page's own inline scripts, by hash; a missing
+  // hash would block Next's bootstrap and leave the page unhydrated.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __csp: string[] }
+    w.__csp = []
+    document.addEventListener("securitypolicyviolation", (e) => w.__csp.push(`${e.violatedDirective} ${e.blockedURI}`))
+  })
+  const consoleViolations: string[] = []
+  page.on("console", (msg) => {
+    if (msg.text().includes("Content Security Policy")) consoleViolations.push(msg.text())
+  })
+  const paths = [
+    `/site?id=${id}`,
+    "/",
+    "/settings/security",
+    "/login",
+    "/login/recover",
+    "/signup",
+    "/invite",
+    "/verify-email",
+    "/consent?error=invalid_request",
+    "/no-such-page",
+  ]
+  for (const path of paths) {
+    const res = await page.goto(path)
+    const csp = res?.headers()["content-security-policy"] ?? ""
+    expect(csp, path).toContain("frame-ancestors 'none'")
+    expect(csp, path).toMatch(/script-src 'self'( 'sha256-[A-Za-z0-9+/=]+')+;/)
+    // Hydrated: Next's router is live.
+    await page.waitForFunction(() => "next" in window)
+    expect(await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp), path).toEqual([])
+  }
+  expect(consoleViolations).toEqual([])
+})

@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -146,6 +148,24 @@ type finishRequest struct {
 
 // Sign-up: one screen, an email and a new passkey.
 
+// maxUnverifiedEmailClaims caps how many accounts may claim one address
+// unverified (docs/design.md#accounts), so nobody can pile up accounts on
+// someone else's address. Verifying the address displaces them all.
+const maxUnverifiedEmailClaims = 5
+
+// errEmailUnavailable refuses a sign-up over the cap without saying who
+// holds the address.
+var errEmailUnavailable = appapi.NewError(http.StatusBadRequest, "email_unavailable",
+	"This address can't be used for a new account. Sign in instead, or use another address.")
+
+// claimCapReached reports whether email already has
+// maxUnverifiedEmailClaims unverified claims. Concurrent sign-ups can
+// overshoot it slightly; it bounds abuse, not exact counts.
+func claimCapReached(ctx context.Context, q *db.Queries, email string) (bool, error) {
+	n, err := q.CountUnverifiedEmailClaims(ctx, email)
+	return n >= maxUnverifiedEmailClaims, err
+}
+
 type signupFlow struct {
 	Session webauthn.SessionData `json:"session"`
 	UserID  uuid.UUID            `json:"userId"`
@@ -162,6 +182,11 @@ func (m *module) signupBegin(w http.ResponseWriter, r *http.Request) error {
 	email, ok := normalizeEmail(in.Email)
 	if !ok {
 		return errBadRequest("invalid_email", "Enter a valid email address.")
+	}
+	if full, err := claimCapReached(r.Context(), m.q, email); err != nil {
+		return err
+	} else if full {
+		return errEmailUnavailable
 	}
 	u := &waUser{id: newID(), name: email}
 	creation, sess, err := m.wa.BeginRegistration(u)
@@ -195,6 +220,11 @@ func (m *module) signupFinish(w http.ResponseWriter, r *http.Request) error {
 	}
 	var emailID uuid.UUID
 	err = db.InTx(r.Context(), m.d.DB, func(q *db.Queries) error {
+		if full, err := claimCapReached(r.Context(), q, f.Email); err != nil {
+			return err
+		} else if full {
+			return errEmailUnavailable
+		}
 		if _, err := q.CreateUser(r.Context(), f.UserID); err != nil {
 			return err
 		}
@@ -227,6 +257,9 @@ type loginFlow struct {
 	// Candidates limits an email-first sign-in to the accounts claiming the
 	// address; empty for a usernameless one.
 	Candidates []uuid.UUID `json:"candidates,omitempty"`
+	// Decoy marks an email-first sign-in for an address without passkeys,
+	// offered decoyCredential; it never succeeds.
+	Decoy bool `json:"decoy,omitempty"`
 }
 
 func (m *module) loginBegin(w http.ResponseWriter, r *http.Request) error {
@@ -250,10 +283,12 @@ func (m *module) loginBegin(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		f.Candidates = users
+		allowed := descriptors(creds)
 		if len(creds) == 0 {
-			return appapi.NewError(http.StatusNotFound, "no_passkey", "No passkey is registered for that email. Try Google or a recovery code.")
+			f.Decoy = true
+			allowed = []protocol.CredentialDescriptor{m.decoyCredential(email)}
 		}
-		opts = append(opts, webauthn.WithAllowedCredentials(descriptors(creds)))
+		opts = append(opts, webauthn.WithAllowedCredentials(allowed))
 	}
 	assertion, sess, err := m.wa.BeginDiscoverableLogin(opts...)
 	if err != nil {
@@ -296,6 +331,21 @@ func (m *module) emailCandidates(ctx context.Context, email string) ([]uuid.UUID
 	return users, creds, nil
 }
 
+// decoyCredential stands in for the passkeys of an address that has none
+// (no account, or Google only), so email-first sign-in does not reveal
+// which addresses have them: a 16-byte ID keyed by the address, stable
+// across attempts, with a synced passkey's transports. No authenticator
+// holds it, so the browser finds no passkey, as for a lost one.
+func (m *module) decoyCredential(email string) protocol.CredentialDescriptor {
+	mac := hmac.New(sha256.New, m.decoyKey)
+	mac.Write([]byte(email))
+	return protocol.CredentialDescriptor{
+		Type:         protocol.PublicKeyCredentialType,
+		CredentialID: mac.Sum(nil)[:16],
+		Transport:    []protocol.AuthenticatorTransport{protocol.Internal, protocol.Hybrid},
+	}
+}
+
 var errUnknownPasskey = appapi.NewError(http.StatusBadRequest, "unknown_passkey",
 	"This passkey isn't registered here. It may have been removed, or belong to another account.")
 
@@ -313,7 +363,9 @@ func (m *module) loginFinish(w http.ResponseWriter, r *http.Request) error {
 		return m.passkeyFailed(err)
 	}
 	row, err := m.q.GetPasskeyByCredentialID(r.Context(), parsed.RawID)
-	if isNoRows(err) {
+	if f.Decoy || isNoRows(err) {
+		// A decoy flow fails like a credential that is not registered,
+		// rather than falling back to a usernameless sign-in.
 		return errUnknownPasskey
 	}
 	if err != nil {

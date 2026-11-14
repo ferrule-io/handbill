@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"io/fs"
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -246,16 +249,32 @@ func TestStagedDeployment(t *testing.T) {
 	s := e.site(t)
 	dep, err := e.svc.CreateDeployment(ctx, s.ID, e.owner, sites.Replace)
 	must(t, err)
-	must(t, e.svc.AddFiles(ctx, dep, []sites.File{file("index.html", "a"), file("index.html", "b")}))
-	must(t, e.svc.AddFiles(ctx, dep, []sites.File{file("app.js", "c"), {Path: "data", ContentType: "application/json", Body: []byte("{}")}}))
-	wantInputError(t, "replace delete", e.svc.DeletePaths(ctx, dep, []string{"x"}))
+	must(t, e.svc.AddFiles(ctx, dep, e.owner, []sites.File{file("index.html", "a"), file("index.html", "b")}))
+	must(t, e.svc.AddFiles(ctx, dep, e.owner, []sites.File{file("app.js", "c"), {Path: "data", ContentType: "application/json", Body: []byte("{}")}}))
+	wantInputError(t, "replace delete", e.svc.DeletePaths(ctx, dep, e.owner, []string{"x"}))
+	// Only the creator adds to or finalizes it, not even another manager.
+	other := sitestest.User(t, e.d, "manager@example.com")
+	sitestest.Member(t, e.d, s.ID, other, "manager")
+	for what, err := range map[string]error{
+		"add":     e.svc.AddFiles(ctx, dep, other, []sites.File{file("index.html", "theirs")}),
+		"delete":  e.svc.DeletePaths(ctx, dep, other, []string{"x"}),
+		"archive": e.svc.AddArchive(ctx, dep, other, bytes.NewReader(tarGz(t, entry{name: "index.html", body: "theirs"})), "tar.gz"),
+		"nobody":  e.svc.AddFiles(ctx, dep, uuid.Nil, []sites.File{file("index.html", "theirs")}),
+	} {
+		if !errors.Is(err, sites.ErrNotCreator) {
+			t.Fatalf("%s by another account: %v", what, err)
+		}
+	}
+	if _, err := e.svc.Finalize(ctx, dep, other); !errors.Is(err, sites.ErrNotCreator) {
+		t.Fatalf("finalize by another account: %v", err)
+	}
 	// Nothing is visible before finalize.
 	if fis, _ := e.svc.ListFiles(ctx, s.ID); len(fis) != 0 {
 		t.Fatalf("files before finalize: %v", fis)
 	}
-	v, err := e.svc.Finalize(ctx, dep)
+	v, err := e.svc.Finalize(ctx, dep, e.owner)
 	must(t, err)
-	if v.FileCount != 3 {
+	if v.FileCount != 3 || v.PublishedBy != e.owner {
 		t.Fatalf("version %+v", v)
 	}
 	wantContents(t, e.contents(t, s.ID), map[string]string{"index.html": "b", "app.js": "c", "data": "{}"})
@@ -264,22 +283,22 @@ func TestStagedDeployment(t *testing.T) {
 		t.Fatalf("given content type became %q", fis[i].ContentType)
 	}
 
-	if _, err := e.svc.Finalize(ctx, dep); !errors.Is(err, sites.ErrDeploymentClosed) {
+	if _, err := e.svc.Finalize(ctx, dep, e.owner); !errors.Is(err, sites.ErrDeploymentClosed) {
 		t.Fatalf("second finalize: %v", err)
 	}
-	if err := e.svc.AddFiles(ctx, dep, []sites.File{file("late.html", "x")}); !errors.Is(err, sites.ErrDeploymentClosed) {
+	if err := e.svc.AddFiles(ctx, dep, e.owner, []sites.File{file("late.html", "x")}); !errors.Is(err, sites.ErrDeploymentClosed) {
 		t.Fatalf("add after finalize: %v", err)
 	}
-	if _, err := e.svc.Finalize(ctx, uuid.New()); !errors.Is(err, sites.ErrNotFound) {
+	if _, err := e.svc.Finalize(ctx, uuid.New(), e.owner); !errors.Is(err, sites.ErrNotFound) {
 		t.Fatalf("finalize unknown: %v", err)
 	}
 
 	// Merge: a deletion followed by a re-add keeps the file.
 	dep, err = e.svc.CreateDeployment(ctx, s.ID, e.owner, sites.Merge)
 	must(t, err)
-	must(t, e.svc.DeletePaths(ctx, dep, []string{"app.js", "./data"}))
-	must(t, e.svc.AddFiles(ctx, dep, []sites.File{file("app.js", "d")}))
-	_, err = e.svc.Finalize(ctx, dep)
+	must(t, e.svc.DeletePaths(ctx, dep, e.owner, []string{"app.js", "./data"}))
+	must(t, e.svc.AddFiles(ctx, dep, e.owner, []sites.File{file("app.js", "d")}))
+	_, err = e.svc.Finalize(ctx, dep, e.owner)
 	must(t, err)
 	wantContents(t, e.contents(t, s.ID), map[string]string{"index.html": "b", "app.js": "d"})
 }
@@ -293,10 +312,10 @@ func TestMergeUsesCurrentVersionAtFinalize(t *testing.T) {
 	// Opened before another publish lands, finalized after it.
 	dep, err := e.svc.CreateDeployment(ctx, s.ID, e.owner, sites.Merge)
 	must(t, err)
-	must(t, e.svc.AddFiles(ctx, dep, []sites.File{file("late.html", "late")}))
+	must(t, e.svc.AddFiles(ctx, dep, e.owner, []sites.File{file("late.html", "late")}))
 	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Merge, []sites.File{file("early.html", "early")}, nil)
 	must(t, err)
-	_, err = e.svc.Finalize(ctx, dep)
+	_, err = e.svc.Finalize(ctx, dep, e.owner)
 	must(t, err)
 	wantContents(t, e.contents(t, s.ID), map[string]string{"index.html": "base", "early.html": "early", "late.html": "late"})
 }
@@ -317,10 +336,10 @@ func TestConcurrentMergesKeepEveryFile(t *testing.T) {
 		wg.Go(func() {
 			dep, err := e.svc.CreateDeployment(ctx, s.ID, e.owner, sites.Merge)
 			if err == nil {
-				err = e.svc.AddFiles(ctx, dep, []sites.File{file(p, p)})
+				err = e.svc.AddFiles(ctx, dep, e.owner, []sites.File{file(p, p)})
 			}
 			if err == nil {
-				_, err = e.svc.Finalize(ctx, dep)
+				_, err = e.svc.Finalize(ctx, dep, e.owner)
 			}
 			errs <- err
 		})
@@ -486,10 +505,10 @@ func (e *env) publishArchive(t *testing.T, siteID string, data []byte, format st
 	t.Helper()
 	dep, err := e.svc.CreateDeployment(t.Context(), siteID, e.owner, sites.Replace)
 	must(t, err)
-	if err := e.svc.AddArchive(t.Context(), dep, bytes.NewReader(data), format); err != nil {
+	if err := e.svc.AddArchive(t.Context(), dep, e.owner, bytes.NewReader(data), format); err != nil {
 		return err
 	}
-	_, err = e.svc.Finalize(t.Context(), dep)
+	_, err = e.svc.Finalize(t.Context(), dep, e.owner)
 	return err
 }
 
@@ -553,5 +572,176 @@ func TestArchiveRejects(t *testing.T) {
 	wantInputError(t, "format", e.publishArchive(t, s.ID, nil, "rar"))
 	if fis, _ := e.svc.ListFiles(t.Context(), s.ID); len(fis) != 0 {
 		t.Fatalf("rejected archives published files: %v", fis)
+	}
+}
+
+func wantInputErrorContaining(t *testing.T, what string, err error, want string) {
+	t.Helper()
+	var ie *sites.InputError
+	if !errors.As(err, &ie) || !strings.Contains(ie.Msg, want) {
+		t.Fatalf("%s: want *InputError containing %q, got %v", what, want, err)
+	}
+}
+
+// rawZip returns a zip whose central directory holds records headers (empty
+// names, all pointing at one stored file at offset 0) while its end record
+// declares declared entries; zip64 declares them in a zip64 end record.
+func rawZip(records int, declared uint64, zip64 bool) []byte {
+	le := binary.LittleEndian
+	var b bytes.Buffer
+	local := make([]byte, 30)
+	le.PutUint32(local, 0x04034b50)
+	le.PutUint16(local[4:], 20)
+	le.PutUint16(local[26:], 5)
+	b.Write(local)
+	b.WriteString("a.txt")
+	cdOffset := b.Len()
+	central := make([]byte, 46)
+	le.PutUint32(central, 0x02014b50)
+	le.PutUint16(central[4:], 20)
+	le.PutUint16(central[6:], 20)
+	for range records {
+		b.Write(central)
+	}
+	cdSize := b.Len() - cdOffset
+	count := uint16(declared)
+	if zip64 {
+		count = 0xffff
+		end64 := make([]byte, 56)
+		le.PutUint32(end64, 0x06064b50)
+		le.PutUint64(end64[4:], 44)
+		le.PutUint16(end64[12:], 45)
+		le.PutUint16(end64[14:], 45)
+		le.PutUint64(end64[24:], declared)
+		le.PutUint64(end64[32:], declared)
+		le.PutUint64(end64[40:], uint64(cdSize))
+		le.PutUint64(end64[48:], uint64(cdOffset))
+		locator := make([]byte, 20)
+		le.PutUint32(locator, 0x07064b50)
+		le.PutUint64(locator[8:], uint64(b.Len()))
+		le.PutUint32(locator[16:], 1)
+		b.Write(end64)
+		b.Write(locator)
+	}
+	end := make([]byte, 22)
+	le.PutUint32(end, 0x06054b50)
+	le.PutUint16(end[8:], count)
+	le.PutUint16(end[10:], count)
+	le.PutUint32(end[12:], uint32(cdSize))
+	le.PutUint32(end[16:], uint32(cdOffset))
+	b.Write(end)
+	return b.Bytes()
+}
+
+func TestZipCentralDirectoryBomb(t *testing.T) {
+	e := newEnv(t)
+	s := e.site(t)
+	dep, err := e.svc.CreateDeployment(t.Context(), s.ID, e.owner, sites.Replace)
+	must(t, err)
+	addZip := func(data []byte) error {
+		return e.svc.AddArchive(t.Context(), dep, e.owner, bytes.NewReader(data), "zip")
+	}
+
+	// archive/zip compares only the low 16 bits of the declared count and
+	// reads every header in the directory: 200,000 records declared as
+	// 200,000 mod 65536. Rejected before any per-entry allocation.
+	bomb := rawZip(200_000, 200_000, false)
+	var bombErr error
+	allocs := testing.AllocsPerRun(1, func() { bombErr = addZip(bomb) })
+	if allocs > sites.MaxArchiveEntries {
+		t.Fatalf("wrapped count: %v allocations, want fewer than %d", allocs, sites.MaxArchiveEntries)
+	}
+	wantInputErrorContaining(t, "wrapped count", bombErr, "more than")
+
+	// A declared count over the cap, here through a zip64 end record.
+	wantInputErrorContaining(t, "zip64 declared", addZip(rawZip(1, sites.MaxArchiveEntries+1, true)), "more than")
+}
+
+// paxRecord returns one PAX extended-header record, "<len> key=value\n".
+func paxRecord(key, value string) string {
+	rest := " " + key + "=" + value + "\n"
+	n := len(rest) + 1
+	for len(strconv.Itoa(n))+len(rest) != n {
+		n++
+	}
+	return strconv.Itoa(n) + rest
+}
+
+// ustarHeader returns a raw 512-byte ustar header block.
+func ustarHeader(name string, flag byte, size int) []byte {
+	h := make([]byte, 512)
+	copy(h, name)
+	copy(h[100:], "0000644\x00")
+	copy(h[124:], fmt.Sprintf("%011o\x00", size))
+	copy(h[136:], fmt.Sprintf("%011o\x00", 0))
+	h[156] = flag
+	copy(h[257:], "ustar\x0000")
+	copy(h[148:], "        ")
+	sum := 0
+	for _, c := range h {
+		sum += int(c)
+	}
+	copy(h[148:], fmt.Sprintf("%06o\x00 ", sum))
+	return h
+}
+
+func TestTarGzMetadataBomb(t *testing.T) {
+	e := newEnv(t)
+	s := e.site(t)
+	sites.SetMaxTarStream(t, 1<<20)
+	// 32 chained PAX headers of 64 KiB each, none an entry, then one small
+	// file: 2 MiB decompressed against a 1 MiB stream limit.
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	rec := paxRecord("comment", strings.Repeat("x", 64<<10))
+	for range 32 {
+		_, err := zw.Write(ustarHeader("PaxHeaders/x", tar.TypeXHeader, len(rec)))
+		must(t, err)
+		_, err = zw.Write(append([]byte(rec), make([]byte, -len(rec)&511)...))
+		must(t, err)
+	}
+	tw := tar.NewWriter(zw)
+	must(t, tw.WriteHeader(&tar.Header{Name: "index.html", Mode: 0o644, Size: 2, Typeflag: tar.TypeReg}))
+	_, err := tw.Write([]byte("hi"))
+	must(t, err)
+	must(t, tw.Close())
+	must(t, zw.Close())
+	wantInputErrorContaining(t, "PAX chain", e.publishArchive(t, s.ID, buf.Bytes(), "tar.gz"), "archive is larger than")
+
+	// A plain archive under the lowered limit still publishes.
+	must(t, e.publishArchive(t, s.ID, tarGz(t, entry{name: "index.html", body: "ok"}), "tar.gz"))
+}
+
+// hookStore runs beforePut ahead of every Put.
+type hookStore struct {
+	storage.Store
+	beforePut func()
+}
+
+func (h hookStore) Put(ctx context.Context, key string, r io.Reader, size int64, ct string) error {
+	h.beforePut()
+	return h.Store.Put(ctx, key, r, size, ct)
+}
+
+// A site deleted while a blob upload is in flight, after sites.Delete
+// cleared its storage prefix, leaves no object behind.
+func TestUploadRacingSiteDelete(t *testing.T) {
+	d := sitestest.Deps(t)
+	var svc *sites.Service
+	var siteID string
+	d.Storage = hookStore{Store: d.Storage, beforePut: func() { must(t, svc.Delete(t.Context(), siteID)) }}
+	svc = sites.NewService(d)
+	owner := sitestest.User(t, d, "owner@example.com")
+	s, err := svc.Create(t.Context(), owner, "Doomed", "")
+	must(t, err)
+	siteID = s.ID
+	dep, err := svc.CreateDeployment(t.Context(), s.ID, owner, sites.Replace)
+	must(t, err)
+	if err := svc.AddFiles(t.Context(), dep, owner, []sites.File{file("index.html", "late")}); !errors.Is(err, sites.ErrNotFound) {
+		t.Fatalf("AddFiles after site delete: %v, want ErrNotFound", err)
+	}
+	sum := sha256.Sum256([]byte("late"))
+	if _, err := d.Storage.Stat(t.Context(), "sites/"+s.ID+"/blobs/"+hex.EncodeToString(sum[:])); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("blob left behind: %v", err)
 	}
 }

@@ -1,6 +1,8 @@
 package siteserver_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -191,6 +193,11 @@ func TestHandoffEndToEnd(t *testing.T) {
 	if got := location(t, rec).String(); got != "/about?tab=2" || rec.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("callback redirect %q", got)
 	}
+	// Issuing a cookie clears the origin's storage (service workers
+	// included) but not the cookie it sets.
+	if got := rec.Header().Get("Clear-Site-Data"); got != `"storage"` {
+		t.Fatalf("callback Clear-Site-Data %q", got)
+	}
 	var cookie *http.Cookie
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == siteserver.CookieName {
@@ -217,6 +224,49 @@ func TestHandoffEndToEnd(t *testing.T) {
 	rec = e.do(req{url: e.siteURL(other.ID, "/"), cookie: cookie})
 	if rec.Code != http.StatusFound {
 		t.Fatalf("cookie on another site: %d %q", rec.Code, rec.Body)
+	}
+}
+
+// Site content can never register a service worker: it would intercept
+// /_auth/ navigations and outlive the visitor's access.
+func TestServiceWorkerScriptsRefused(t *testing.T) {
+	e := newEnv(t)
+	s := e.newSite(map[string]string{"index.html": "home", "sw.js": "self.onfetch = () => {}"})
+	cookie := e.cookieFor(s.ID, e.owner)
+	if rec := e.do(req{url: e.siteURL(s.ID, "/sw.js"), cookie: cookie}); rec.Code != http.StatusOK {
+		t.Fatalf("plain fetch: %d", rec.Code)
+	}
+	for _, c := range []*http.Cookie{cookie, nil} {
+		rec := e.do(req{url: e.siteURL(s.ID, "/sw.js"), cookie: c, headers: map[string]string{"Service-Worker": "script"}})
+		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "onfetch") {
+			t.Fatalf("service worker script (cookie %v): %d %q", c != nil, rec.Code, rec.Body)
+		}
+	}
+}
+
+// The public link's opener page carries the token only in the fragment;
+// its CSP admits exactly its own script and a same-origin form post.
+func TestShareOpenerPage(t *testing.T) {
+	e := newEnv(t)
+	rec := e.do(req{url: e.siteURL(e.site.ID, "/_auth/share")})
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || len(rec.Result().Cookies()) != 0 || !strings.Contains(body, `<form id="share" method="post" action="/_auth/share">`) {
+		t.Fatalf("opener: %d %q", rec.Code, body)
+	}
+	_, script, ok := strings.Cut(body, "<script>")
+	script, _, ok2 := strings.Cut(script, "</script>")
+	if !ok || !ok2 || strings.Count(body, "<script") != 1 {
+		t.Fatalf("opener scripts: %q", body)
+	}
+	sum := sha256.Sum256([]byte(script))
+	csp := rec.Header().Get("Content-Security-Policy")
+	want := "script-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "';"
+	if !strings.Contains(csp, want) || !strings.Contains(csp, "form-action 'self'") || !strings.Contains(csp, "default-src 'none'") ||
+		!strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("opener CSP %q, want %q", csp, want)
+	}
+	if rec.Header().Get("Referrer-Policy") != "no-referrer" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("opener headers %v", rec.Header())
 	}
 }
 
@@ -481,6 +531,29 @@ func TestRollbackSwitchesContent(t *testing.T) {
 	}
 	if get("/") != "<h1>home</h1>" || get("/new") != "<h1>custom 404</h1>" {
 		t.Fatalf("after rollback: %q %q", get("/"), get("/new"))
+	}
+}
+
+// With an https APP_ORIGIN, site hosts (same scheme) send HSTS too.
+func TestSiteHSTS(t *testing.T) {
+	for _, scheme := range []string{"https", "http"} {
+		d := sitestest.Deps(t)
+		origin := *d.Config.AppOrigin
+		origin.Scheme = scheme
+		cfg := *d.Config
+		cfg.AppOrigin = &origin
+		d2 := *d
+		d2.Config = &cfg
+		h, err := server.New(&d2, siteserver.Register)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", scheme+"://"+siteHost("abcdefghijkl")+"/_auth/share", nil))
+		got := rec.Header().Get("Strict-Transport-Security")
+		if (scheme == "https") != (got == "max-age=31536000") || (scheme == "http" && got != "") {
+			t.Errorf("%s: HSTS %q", scheme, got)
+		}
 	}
 }
 

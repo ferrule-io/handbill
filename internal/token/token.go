@@ -3,11 +3,12 @@
 //
 //   - lookup tokens (sessions, site tickets, OAuth codes and tokens, invites,
 //     transfers, public links, email verification), stored as SHA-256;
-//   - recovery codes, stored as argon2id;
+//   - recovery codes, stored as argon2id beside a keyed lookup hash;
 //   - HMAC-signed values (site cookies, upload grants), not stored.
 package token
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -18,6 +19,21 @@ import (
 
 	"golang.org/x/crypto/argon2"
 )
+
+// Purposes of keys derived with DeriveKey outside the Signer.
+const (
+	PurposeRecoveryCode = "recovery-code" // RecoveryCodeLookup
+	PurposePasskeyDecoy = "passkey-decoy" // decoy credential IDs (internal/auth)
+)
+
+// DeriveKey returns the HMAC-SHA256 key for purpose derived from secret
+// (config.Config.SecretKey), so each purpose has its own key. Rotating
+// SECRET_KEY changes every derived key.
+func DeriveKey(secret []byte, purpose string) []byte {
+	m := hmac.New(sha256.New, secret)
+	m.Write([]byte("handbill/token/v1/" + purpose))
+	return m.Sum(nil)
+}
 
 // New returns a fresh lookup token: 32 random bytes, base64url without
 // padding, and its Hash. Store only the hash.
@@ -41,7 +57,7 @@ const recoveryLen = 16
 
 // argon2id parameters: the OWASP minimum (19 MiB, 2 passes, 1 lane). The
 // codes carry 80 random bits, so this mainly slows offline guessing of a
-// leaked database; a sign-in compares up to ten codes per account.
+// leaked database; a sign-in verifies one code, found by its lookup hash.
 const (
 	argonMemory  = 19 * 1024 // KiB
 	argonTime    = 2
@@ -95,6 +111,20 @@ func HashRecoveryCode(code string) (string, error) {
 	key := argon2.IDKey([]byte(norm), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argonMemory, argonTime, argonThreads,
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
+}
+
+// RecoveryCodeLookup returns the lookup hash of a recovery code: the
+// HMAC-SHA256 of its normalized form under key (DeriveKey with
+// PurposeRecoveryCode). Stored unique beside the argon2id hash, it lets a
+// sign-in find the one code to verify. ok is false for a malformed code.
+func RecoveryCodeLookup(key []byte, code string) (hash []byte, ok bool) {
+	norm, ok := normalizeRecoveryCode(code)
+	if !ok {
+		return nil, false
+	}
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(norm))
+	return m.Sum(nil), true
 }
 
 // VerifyRecoveryCode reports whether code matches a HashRecoveryCode result.

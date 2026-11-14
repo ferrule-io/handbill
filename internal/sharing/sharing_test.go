@@ -105,15 +105,15 @@ func (e *env) exec(sql string, args ...any) {
 	}
 }
 
+// tokenOf returns the token in an invite, transfer, or public link, all of
+// which carry it in the fragment as #token=.
 func tokenOf(t *testing.T, link string) string {
 	t.Helper()
-	for _, sep := range []string{"#token=", "/_auth/share/"} {
-		if i := strings.Index(link, sep); i >= 0 {
-			return link[i+len(sep):]
-		}
+	i := strings.Index(link, "#token=")
+	if i < 0 {
+		t.Fatalf("no token in %q", link)
 	}
-	t.Fatalf("no token in %q", link)
-	return ""
+	return link[i+len("#token="):]
 }
 
 func who(id uuid.UUID) identity.User { return identity.User{ID: id} }
@@ -648,7 +648,7 @@ func TestPublicLinkLifecycle(t *testing.T) {
 
 	link, err := e.svc.SetPublicLink(ctx, site, e.owner, sharing.LinkEnable)
 	wantErr(t, err, nil)
-	if want := "http://" + site + "." + sitestest.SitesDomain + ":8084/_auth/share/"; !strings.HasPrefix(link, want) {
+	if want := "http://" + site + "." + sitestest.SitesDomain + ":8084/_auth/share#token="; !strings.HasPrefix(link, want) {
 		t.Fatalf("link = %q, want prefix %q", link, want)
 	}
 	if a := access(); !a.PublicLinkEnabled || a.PublicLinkGen != 1 || !state().Enabled {
@@ -682,16 +682,19 @@ func TestNotifications(t *testing.T) {
 	site := e.site()
 	inv, err := e.svc.Invite(ctx, site, e.owner, "guest@example.com", rbac.Viewer, true)
 	wantErr(t, err, nil)
-	if !inv.Emailed || len(e.mail.sent) != 1 {
-		t.Fatalf("emailed %v, sent %d", inv.Emailed, len(e.mail.sent))
+	if !inv.Emailed || inv.NotEmailedReason != "" || len(e.mail.sent) != 1 {
+		t.Fatalf("emailed %v (%q), sent %d", inv.Emailed, inv.NotEmailedReason, len(e.mail.sent))
 	}
 	m := e.mail.sent[0]
 	if m.To != "guest@example.com" || !strings.Contains(m.Subject, "Kyoto in April") ||
 		!strings.Contains(m.Text, inv.Link) || !strings.Contains(m.Text, "owner@example.com") || !strings.Contains(m.HTML, "Open invitation") {
 		t.Fatalf("message = %+v", m)
 	}
-	if _, err := e.svc.Invite(ctx, site, e.owner, "quiet@example.com", rbac.Viewer, false); err != nil || len(e.mail.sent) != 1 {
+	if quiet, err := e.svc.Invite(ctx, site, e.owner, "quiet@example.com", rbac.Viewer, false); err != nil || len(e.mail.sent) != 1 || quiet.NotEmailedReason != "" {
 		t.Fatal("notify=false sent mail")
+	}
+	if sent, reason, err := e.svc.NotifyUpdate(ctx, site, e.owner); err != nil || reason != "" || sent != 0 {
+		t.Fatalf("update with no other members: %d %q %v", sent, reason, err)
 	}
 	tr, err := e.svc.StartTransfer(ctx, site, e.owner, "heir@example.com", true)
 	wantErr(t, err, nil)
@@ -703,7 +706,76 @@ func TestNotifications(t *testing.T) {
 	e.svc.SetMailer(mail.New(nil))
 	inv, err = e.svc.Invite(ctx, site, e.owner, "nosmtp@example.com", rbac.Viewer, true)
 	wantErr(t, err, nil)
-	if inv.Emailed || inv.Link == "" {
+	if inv.Emailed || inv.Link == "" || inv.NotEmailedReason != sharing.NotSentMailDisabled {
 		t.Fatalf("without SMTP: %+v", inv)
+	}
+	if _, reason, err := e.svc.NotifyUpdate(ctx, site, e.owner); err != nil || reason != sharing.NotSentMailDisabled {
+		t.Fatalf("update without SMTP: %q %v", reason, err)
+	}
+}
+
+// A manager cannot replace (and so revoke) a pending manager invite by
+// re-inviting the address as a viewer; the owner's link keeps working.
+func TestReinviteKeepsManagerInvite(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	site := e.site()
+	mgr := e.member(site, rbac.Manager)
+	inv, err := e.svc.Invite(ctx, site, e.owner, "carol@example.com", rbac.Manager, false)
+	wantErr(t, err, nil)
+	_, err = e.svc.Invite(ctx, site, mgr, "carol@example.com", rbac.Viewer, false)
+	wantInputError(t, err)
+	carol := e.unverifiedUser("carol-other@example.com")
+	got, err := e.svc.Accept(ctx, tokenOf(t, inv.Link), who(carol))
+	wantErr(t, err, nil)
+	if got != site || e.role(site, carol) != rbac.Manager {
+		t.Fatalf("accept = %q, role %q", got, e.role(site, carol))
+	}
+	// Viewer invites stay replaceable by managers.
+	first, err := e.svc.Invite(ctx, site, mgr, "dave@example.com", rbac.Viewer, false)
+	wantErr(t, err, nil)
+	_, err = e.svc.Invite(ctx, site, mgr, "dave@example.com", rbac.Viewer, false)
+	wantErr(t, err, nil)
+	_, err = e.svc.Accept(ctx, tokenOf(t, first.Link), who(e.user("dave")))
+	wantErr(t, err, sharing.ErrLinkUnusable)
+}
+
+// Mail goes out only from a verified sender: an unverified account still
+// gets its links, but nothing is emailed in its name.
+func TestUnverifiedSenderNotEmailed(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	unverified := e.unverifiedUser("spoof@example.com")
+	s, err := e.sites.Create(ctx, unverified, "Totally your bank", "")
+	wantErr(t, err, nil)
+	site := s.ID
+	viewer := e.user("viewer")
+	sitestest.Member(t, e.d, site, viewer, "viewer")
+
+	inv, err := e.svc.Invite(ctx, site, unverified, "victim@example.com", rbac.Viewer, true)
+	wantErr(t, err, nil)
+	if inv.Emailed || inv.Link == "" || inv.NotEmailedReason != sharing.NotSentSenderUnverified || len(e.mail.sent) != 0 {
+		t.Fatalf("invite from unverified sender: %+v, sent %d", inv, len(e.mail.sent))
+	}
+	tr, err := e.svc.StartTransfer(ctx, site, unverified, "heir@example.com", true)
+	wantErr(t, err, nil)
+	if tr.Emailed || tr.Link == "" || tr.NotEmailedReason != sharing.NotSentSenderUnverified || len(e.mail.sent) != 0 {
+		t.Fatalf("transfer from unverified sender: %+v, sent %d", tr, len(e.mail.sent))
+	}
+	sent, reason, err := e.svc.NotifyUpdate(ctx, site, unverified)
+	wantErr(t, err, nil)
+	if sent != 0 || reason != sharing.NotSentSenderUnverified || len(e.mail.sent) != 0 {
+		t.Fatalf("update from unverified sender: %d %q, sent %d", sent, reason, len(e.mail.sent))
+	}
+
+	// Members show whose address is verified.
+	ms, _, err := e.svc.Members(ctx, site, unverified)
+	wantErr(t, err, nil)
+	verified := map[uuid.UUID]bool{}
+	for _, m := range ms {
+		verified[m.UserID] = m.EmailVerified
+	}
+	if len(ms) != 2 || verified[unverified] || !verified[viewer] {
+		t.Fatalf("members %+v", ms)
 	}
 }

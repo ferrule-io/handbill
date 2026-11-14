@@ -11,13 +11,20 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
 
 	"github.com/ferrule-io/handbill/internal/server"
 )
@@ -41,14 +48,28 @@ func Register(r *server.Routes, d *server.Deps) error {
 	if !h.Built() {
 		d.Logger.Warn("web UI not built; serving a placeholder (run `make web`)")
 	}
+	if d.Config.AppOrigin.Scheme == "https" {
+		r.UseApp(hsts)
+	}
 	r.App.Handle("GET /", h)
 	return nil
+}
+
+// hsts pins every app-host response to HTTPS for a year. Site hosts get
+// their own (internal/siteserver).
+func hsts(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		next.ServeHTTP(w, r)
+	})
 }
 
 type file struct {
 	body        []byte
 	etag        string
 	contentType string
+	// csp is the Content-Security-Policy of an HTML page; "" for other files.
+	csp string
 }
 
 // Handler serves an exported UI tree.
@@ -58,7 +79,7 @@ type Handler struct {
 }
 
 // New indexes every regular file in fsys. The export is small and already
-// in memory, so bodies and ETags are computed once here.
+// in memory, so bodies, ETags, and each page's CSP are computed once here.
 func New(fsys fs.FS) (*Handler, error) {
 	h := &Handler{files: map[string]*file{}}
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
@@ -70,11 +91,17 @@ func New(fsys fs.FS) (*Handler, error) {
 			return err
 		}
 		sum := sha256.Sum256(b)
-		h.files[p] = &file{
+		f := &file{
 			body:        b,
 			etag:        `"` + hex.EncodeToString(sum[:16]) + `"`,
 			contentType: contentType(p),
 		}
+		if path.Ext(p) == ".html" {
+			if f.csp, err = pageCSP(b); err != nil {
+				return fmt.Errorf("webui: %s: %w", p, err)
+			}
+		}
+		h.files[p] = f
 		return nil
 	})
 	if err != nil {
@@ -82,6 +109,39 @@ func New(fsys fs.FS) (*Handler, error) {
 	}
 	h.notFound = h.files["404.html"]
 	return h, nil
+}
+
+// pageCSP builds an exported page's Content-Security-Policy. The export's
+// inline scripts (theme bootstrap, RSC payload pushes) are fixed at build
+// time, so each is allowed by its SHA-256 and nothing else inline runs.
+// Styles keep 'unsafe-inline' for the style attributes React renders.
+func pageCSP(page []byte) (string, error) {
+	var hashes []string
+	z := html.NewTokenizer(bytes.NewReader(page))
+	inScript := false
+	for {
+		switch z.Next() {
+		case html.ErrorToken:
+			if err := z.Err(); !errors.Is(err, io.EOF) {
+				return "", err
+			}
+			slices.Sort(hashes)
+			return "default-src 'self'; script-src 'self'" + strings.Join(slices.Compact(hashes), "") +
+				"; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'" +
+				"; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'", nil
+		case html.StartTagToken:
+			name, _ := z.TagName()
+			inScript = string(name) == "script"
+		case html.TextToken:
+			if inScript {
+				// Raw, not Text: the hash covers the exact source bytes.
+				sum := sha256.Sum256(z.Raw())
+				hashes = append(hashes, " 'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+			}
+		default:
+			inScript = false
+		}
+	}
 }
 
 // Built reports whether fsys contained an export (index.html and 404.html).
@@ -162,6 +222,9 @@ func (h *Handler) write(w http.ResponseWriter, r *http.Request, status int, name
 	hdr.Set("Content-Type", f.contentType)
 	hdr.Set("X-Content-Type-Options", "nosniff")
 	hdr.Set("X-Frame-Options", "DENY")
+	if f.csp != "" {
+		hdr.Set("Content-Security-Policy", f.csp)
+	}
 	hdr.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	if strings.HasPrefix(name, "_next/static/") {
 		hdr.Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -197,5 +260,7 @@ func (h *Handler) servePlaceholder(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("X-Frame-Options", "DENY")
 	_, _ = w.Write([]byte(placeholder))
 }

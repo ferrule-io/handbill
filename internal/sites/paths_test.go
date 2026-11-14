@@ -27,6 +27,9 @@ func TestCleanPath(t *testing.T) {
 	bad := []string{
 		"", "./", "/index.html", "//x", "a//b", "a/", "a/./b", ".", "..", "../x", "a/../b", "a/..",
 		`a\b`, "a\x00b", "a\nb", "a\tb", "a\x7fb", "\xff.html", "_auth", "_auth/callback",
+		// C1 controls, and invisible format characters (Unicode Cf) that
+		// disguise a path: bidi overrides and isolates, zero-width, BOM.
+		"a\u0085b", "a\u009bb", "evil\u202elmth.html", "a\u2066b\u2069", "in\u200bdex.html", "a\u200db", "\ufeffindex.html", "a\u00adb",
 		strings.Repeat("a", MaxPathLen+1),
 	}
 	for _, in := range bad {

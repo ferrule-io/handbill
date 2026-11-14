@@ -131,7 +131,7 @@ spec:
             - name: PGUSER
               value: {{ .Values.externalDatabase.user | quote }}
             - name: PGSSLMODE
-              value: {{ .Values.externalDatabase.sslmode | default "prefer" | quote }}
+              value: {{ .Values.externalDatabase.sslmode | default "verify-full" | quote }}
     {{- if or .Values.externalDatabase.existingSecret .Values.externalDatabase.password }}
             - name: PGPASSWORD
               valueFrom:

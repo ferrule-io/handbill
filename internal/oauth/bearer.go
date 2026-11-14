@@ -47,8 +47,9 @@ var tokenRE = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 // RequireBearer admits requests with a valid access token for
 // Resource(cfg) and answers 401 with an RFC 9728 WWW-Authenticate challenge
-// otherwise. It overwrites identity.User with the token's user, so a
-// session cookie that came along never acts on its own. Tokens in the
+// otherwise. A DCR client's tokens are refused while DCR is disabled, as at
+// the token endpoint. It overwrites identity.User with the token's user, so
+// a session cookie that came along never acts on its own. Tokens in the
 // query string or form body are never read.
 func RequireBearer(d *server.Deps, next http.Handler) http.Handler {
 	metaURL := ResourceMetadataURL(d.Config)
@@ -70,7 +71,7 @@ func RequireBearer(d *server.Deps, next http.Handler) http.Handler {
 		}
 		q := db.New(d.DB)
 		row, err := q.GetAccessTokenPrincipal(r.Context(), db.GetAccessTokenPrincipalParams{TokenHash: token.Hash(tok), Resource: resource})
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.Registration == registrationDCR && !d.Config.OAuthDCREnabled) {
 			invalid()
 			return
 		}

@@ -20,11 +20,12 @@ import (
 func init() { toolsets = append(toolsets, addSharingTools) }
 
 type memberOut struct {
-	UserID string  `json:"user_id"`
-	Email  *string `json:"email"`
-	Role   string  `json:"role"`
-	You    bool    `json:"you"`
-	Since  string  `json:"since"`
+	UserID        string  `json:"user_id"`
+	Email         *string `json:"email"`
+	EmailVerified bool    `json:"email_verified"`
+	Role          string  `json:"role"`
+	You           bool    `json:"you"`
+	Since         string  `json:"since"`
 }
 
 type inviteOut struct {
@@ -46,7 +47,7 @@ type shareIn struct {
 	Site   string `json:"site" jsonschema:"The site id."`
 	Email  string `json:"email" jsonschema:"The invitee's email address."`
 	Role   string `json:"role" jsonschema:"viewer: can open the site. manager: can also publish and invite viewers (owner only)."`
-	Notify bool   `json:"notify,omitempty" jsonschema:"Also email the link to the invitee when the server has SMTP configured. Default false."`
+	Notify bool   `json:"notify,omitempty" jsonschema:"Also email the link to the invitee when the server has SMTP configured and your email address is verified. Default false."`
 }
 
 type shareOut struct {
@@ -57,8 +58,10 @@ type shareOut struct {
 	InviteLink string `json:"invite_link"`
 	Granted    bool   `json:"granted"`
 	Emailed    bool   `json:"emailed"`
-	ExpiresAt  string `json:"expires_at"`
-	Note       string `json:"note"`
+	// EmailNotSentReason is set when notify was requested but not sent.
+	EmailNotSentReason sharing.NotSentReason `json:"email_not_sent_reason,omitempty"`
+	ExpiresAt          string                `json:"expires_at"`
+	Note               string                `json:"note"`
 }
 
 type setRoleIn struct {
@@ -98,16 +101,30 @@ type publicLinkOut struct {
 type transferIn struct {
 	Site   string `json:"site" jsonschema:"The site id."`
 	Email  string `json:"email" jsonschema:"The new owner's email address."`
-	Notify bool   `json:"notify,omitempty" jsonschema:"Also email the link to them when the server has SMTP configured. Default false."`
+	Notify bool   `json:"notify,omitempty" jsonschema:"Also email the link to them when the server has SMTP configured and your email address is verified. Default false."`
 }
 
 type transferOut struct {
-	Site           string `json:"site"`
-	Email          string `json:"email"`
-	AcceptanceLink string `json:"acceptance_link"`
-	Emailed        bool   `json:"emailed"`
-	ExpiresAt      string `json:"expires_at"`
-	Note           string `json:"note"`
+	Site               string                `json:"site"`
+	Email              string                `json:"email"`
+	AcceptanceLink     string                `json:"acceptance_link"`
+	Emailed            bool                  `json:"emailed"`
+	EmailNotSentReason sharing.NotSentReason `json:"email_not_sent_reason,omitempty"`
+	ExpiresAt          string                `json:"expires_at"`
+	Note               string                `json:"note"`
+}
+
+// notSentNote tells the model why a requested email was not sent and that
+// the link (named by its output field) is its to pass on.
+func notSentNote(r sharing.NotSentReason, field string) string {
+	why := "Emailing it failed"
+	switch r {
+	case sharing.NotSentMailDisabled:
+		why = "This server cannot send email"
+	case sharing.NotSentSenderUnverified:
+		why = "Not emailed because your email address is not verified (verify it in handbill's settings)"
+	}
+	return why + ": give " + field + " to them yourself; it works once."
 }
 
 func enumPatch(name string, values ...any) func(*jsonschema.Schema) {
@@ -162,7 +179,7 @@ func parseID(id string) (uuid.UUID, bool) {
 func addSharingTools(s *mcpsdk.Server, env *Env) {
 	addTool(s, env, &mcpsdk.Tool{
 		Name: "list_members",
-		Description: "List who has access to a site: members with their role (owner, manager, viewer) and pending invites that nobody has accepted yet. " +
+		Description: "List who has access to a site: members with their role (owner, manager, viewer) and whether their email address is verified, and pending invites that nobody has accepted yet. " +
 			"Use the user_id or invite_id with set_member_role or revoke_access. Invite links are never listed: share_site again to get a fresh one.",
 		Annotations: readOnly("List members"),
 	}, sitePatch, func(ctx context.Context, in siteIn) (listMembersOut, error) {
@@ -176,7 +193,7 @@ func addSharingTools(s *mcpsdk.Server, env *Env) {
 		}
 		out := listMembersOut{Site: in.Site, Members: []memberOut{}, PendingInvites: []inviteOut{}}
 		for _, m := range ms {
-			mo := memberOut{UserID: m.UserID.String(), Role: string(m.Role), You: m.UserID == p.UserID, Since: ts(m.Since)}
+			mo := memberOut{UserID: m.UserID.String(), EmailVerified: m.EmailVerified, Role: string(m.Role), You: m.UserID == p.UserID, Since: ts(m.Since)}
 			if m.Email != "" {
 				mo.Email = &m.Email
 			}
@@ -195,7 +212,8 @@ func addSharingTools(s *mcpsdk.Server, env *Env) {
 	addTool(s, env, &mcpsdk.Tool{
 		Name: "share_site",
 		Description: "Invite someone by email to view (viewer) or help manage (manager) a site. Always returns invite_link: give it to the user to send, " +
-			"or set notify to also email it when the server can send mail (emailed says whether it did). The link works once, for whoever opens it and signs in, " +
+			"or set notify to also email it (emailed says whether it did; email_not_sent_reason says why not: mail_disabled, sender_unverified when your own address is not verified, or send_failed). " +
+			"The link works once, for whoever opens it and signs in, " +
 			"until expires_at. If an account already holds that address verified, it gets access immediately (granted: true). Managers may invite viewers; only the owner may invite managers.",
 		Annotations: mutating("Share site", false, false),
 	}, patches(sitePatch, emailPatch, enumPatch("role", "viewer", "manager")), func(ctx context.Context, in shareIn) (shareOut, error) {
@@ -215,14 +233,14 @@ func addSharingTools(s *mcpsdk.Server, env *Env) {
 		switch {
 		case inv.Granted:
 			note = "This address's account already has access now; the link just leads them to the site."
-		case in.Notify && !inv.Emailed && !env.Sharing.MailEnabled():
-			note = "This server cannot send email: give invite_link to the invitee yourself; it works once."
 		case inv.Emailed:
 			note = "The link was also emailed to the invitee; it works once."
+		case inv.NotEmailedReason != "":
+			note = notSentNote(inv.NotEmailedReason, "invite_link")
 		}
 		return shareOut{
 			Site: in.Site, InviteID: inv.ID.String(), Email: inv.Email, Role: string(inv.Role), InviteLink: inv.Link,
-			Granted: inv.Granted, Emailed: inv.Emailed, ExpiresAt: ts(inv.ExpiresAt), Note: note,
+			Granted: inv.Granted, Emailed: inv.Emailed, EmailNotSentReason: inv.NotEmailedReason, ExpiresAt: ts(inv.ExpiresAt), Note: note,
 		}, nil
 	})
 
@@ -261,7 +279,7 @@ func addSharingTools(s *mcpsdk.Server, env *Env) {
 
 	addTool(s, env, &mcpsdk.Tool{
 		Name: "set_public_link",
-		Description: "Turn \"anyone with the link\" access on or off, or replace the link (owner only). Visitors with the link need no account. " +
+		Description: "Turn \"anyone with the link\" access on or off, or replace the link (owner only). Visitors with the link (https://<site>/_auth/share#token=…) need no account. " +
 			"enable and rotate return the link; it is shown only in this response and cannot be retrieved later (rotate for a new one). " +
 			"rotate and disable cut off everyone using the previous link immediately.",
 		Annotations: mutating("Set public link", true, false),
@@ -284,7 +302,8 @@ func addSharingTools(s *mcpsdk.Server, env *Env) {
 	addTool(s, env, &mcpsdk.Tool{
 		Name: "transfer_ownership",
 		Description: "Offer ownership of a site to an email address (owner only) and return acceptance_link. Nothing changes until someone opens the link and accepts while signed in: " +
-			"they become the owner and the current owner becomes a manager. Starting a new transfer replaces a pending one. Confirm with the user first.",
+			"they become the owner and the current owner becomes a manager. Starting a new transfer replaces a pending one. Confirm with the user first. " +
+			"With notify, emailed and email_not_sent_reason say whether it was emailed, as for share_site.",
 		Annotations: mutating("Transfer ownership", true, false),
 	}, patches(sitePatch, emailPatch), func(ctx context.Context, in transferIn) (transferOut, error) {
 		p, err := principal(ctx)
@@ -296,9 +315,15 @@ func addSharingTools(s *mcpsdk.Server, env *Env) {
 			return transferOut{}, env.sharingErr(ctx, "transfer_ownership", in.Site, rbac.Owner, err)
 		}
 		note := "Give acceptance_link to the new owner; it works once."
-		if tr.Emailed {
+		switch {
+		case tr.Emailed:
 			note = "The link was also emailed to them; it works once."
+		case tr.NotEmailedReason != "":
+			note = notSentNote(tr.NotEmailedReason, "acceptance_link")
 		}
-		return transferOut{Site: in.Site, Email: tr.Email, AcceptanceLink: tr.Link, Emailed: tr.Emailed, ExpiresAt: ts(tr.ExpiresAt), Note: note}, nil
+		return transferOut{
+			Site: in.Site, Email: tr.Email, AcceptanceLink: tr.Link, Emailed: tr.Emailed,
+			EmailNotSentReason: tr.NotEmailedReason, ExpiresAt: ts(tr.ExpiresAt), Note: note,
+		}, nil
 	})
 }

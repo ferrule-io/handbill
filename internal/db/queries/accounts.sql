@@ -49,6 +49,11 @@ SELECT EXISTS (SELECT 1 FROM emails WHERE user_id = @user_id AND is_primary);
 SELECT user_id, verified FROM emails WHERE email = @email
 ORDER BY verified DESC, created_at, id;
 
+-- CountUnverifiedEmailClaims counts the accounts claiming an address
+-- unverified, for the per-address cap (docs/design.md#accounts).
+-- name: CountUnverifiedEmailClaims :one
+SELECT count(*) FROM emails WHERE email = @email AND NOT verified;
+
 -- name: GetVerifiedEmailHolder :one
 SELECT user_id FROM emails WHERE email = @email AND verified;
 

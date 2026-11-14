@@ -59,8 +59,8 @@ func (f *fixture) deployment(site string) uuid.UUID {
 	return id
 }
 
-func (f *fixture) url(dep uuid.UUID, site string, expires time.Time) string {
-	return upload.URL(f.d.Config, f.signer, token.UploadGrant{DeploymentID: dep, SiteID: site, Expires: expires})
+func (f *fixture) url(dep uuid.UUID, site string, user uuid.UUID, expires time.Time) string {
+	return upload.URL(f.d.Config, f.signer, token.UploadGrant{DeploymentID: dep, SiteID: site, UserID: user, Expires: expires})
 }
 
 // put sends the archive and returns the status and error code.
@@ -105,29 +105,29 @@ func TestUpload(t *testing.T) {
 	exp := time.Now().Add(upload.GrantTTL)
 
 	dep := f.deployment(f.site)
-	if s, e := f.put(f.url(dep, f.site, exp), tarGz(map[string]string{"site/index.html": "hi", "site/css/a.css": "a"})); s != 200 {
+	if s, e := f.put(f.url(dep, f.site, f.manager, exp), tarGz(map[string]string{"site/index.html": "hi", "site/css/a.css": "a"})); s != 200 {
 		t.Fatalf("tar.gz: %d %s", s, e)
 	}
-	if s, e := f.put(f.url(dep, f.site, exp), zipArchive(map[string]string{"extra.txt": "x"})); s != 200 {
+	if s, e := f.put(f.url(dep, f.site, f.manager, exp), zipArchive(map[string]string{"extra.txt": "x"})); s != 200 {
 		t.Fatalf("zip: %d %s", s, e)
 	}
-	v, err := f.svc.Finalize(t.Context(), dep)
+	v, err := f.svc.Finalize(t.Context(), dep, f.manager)
 	if err != nil || v.FileCount != 3 {
 		t.Fatalf("finalize: %+v %v", v, err)
 	}
 	if fi, err := f.svc.FindFile(t.Context(), v.ID, "index.html"); err != nil || fi.Size != 2 {
 		t.Fatalf("stripped common dir: %+v %v", fi, err)
 	}
-	if s, e := f.put(f.url(dep, f.site, exp), tarGz(map[string]string{"a": "a"})); s != 409 || e != "deployment_closed" {
+	if s, e := f.put(f.url(dep, f.site, f.manager, exp), tarGz(map[string]string{"a": "a"})); s != 409 || e != "deployment_closed" {
 		t.Fatalf("finalized: %d %s", s, e)
 	}
 
 	dep = f.deployment(f.site)
 	body := tarGz(map[string]string{"index.html": "x"})
-	if s, e := f.put(f.url(dep, f.site, time.Now().Add(-time.Second)), body); s != 403 || e != "expired_grant" {
+	if s, e := f.put(f.url(dep, f.site, f.manager, time.Now().Add(-time.Second)), body); s != 403 || e != "expired_grant" {
 		t.Fatalf("expired: %d %s", s, e)
 	}
-	good := f.url(dep, f.site, exp)
+	good := f.url(dep, f.site, f.manager, exp)
 	if s, e := f.put(good[:len(good)-2]+"xx", body); s != 403 || e != "invalid_grant" {
 		t.Fatalf("tampered: %d %s", s, e)
 	}
@@ -145,8 +145,31 @@ func TestUpload(t *testing.T) {
 	// A grant for another site's deployment.
 	s2, _ := f.svc.Create(t.Context(), f.manager, "Other", "")
 	dep2 := f.deployment(s2.ID)
-	if s, e := f.put(f.url(dep2, f.site, exp), body); s != 404 || e != "not_found" {
+	if s, e := f.put(f.url(dep2, f.site, f.manager, exp), body); s != 404 || e != "not_found" {
 		t.Fatalf("other site: %d %s", s, e)
+	}
+
+	// A grant for another account, even one who can publish: a deployment
+	// belongs to its creator.
+	second := sitestest.User(t, f.d, "second@example.com")
+	sitestest.Member(t, f.d, f.site, second, "manager")
+	if s, e := f.put(f.url(dep, f.site, second, exp), body); s != 403 || e != "forbidden" {
+		t.Fatalf("another account's grant: %d %s", s, e)
+	}
+
+	// The grant's user removed from the site within its lifetime.
+	third := sitestest.User(t, f.d, "third@example.com")
+	sitestest.Member(t, f.d, f.site, third, "manager")
+	dep3, err := f.svc.CreateDeployment(t.Context(), f.site, third, sites.Replace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := f.url(dep3, f.site, third, exp)
+	if _, err := f.d.DB.Exec(t.Context(), `DELETE FROM memberships WHERE site_id = $1 AND user_id = $2`, f.site, third); err != nil {
+		t.Fatal(err)
+	}
+	if s, e := f.put(removed, body); s != 403 || e != "forbidden" {
+		t.Fatalf("removed: %d %s", s, e)
 	}
 
 	// Over the limit.

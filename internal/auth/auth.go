@@ -26,6 +26,7 @@ import (
 	"github.com/ferrule-io/handbill/internal/db"
 	mailer "github.com/ferrule-io/handbill/internal/mail"
 	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 // googleIssuer is Google's OIDC issuer; tests substitute a fake one.
@@ -34,14 +35,20 @@ const googleIssuer = "https://accounts.google.com"
 type options struct {
 	googleIssuer string
 	mail         mailer.Sender // nil: from the SMTP configuration
+	// verifyRecovery replaces token.VerifyRecoveryCode, so tests can count
+	// argon2id verifications.
+	verifyRecovery func(encoded, code string) bool
 }
 
 type module struct {
-	d      *server.Deps
-	q      *db.Queries
-	wa     *webauthn.WebAuthn
-	google *googleClient // nil when Google sign-in is not configured
-	mail   mailer.Sender
+	d              *server.Deps
+	q              *db.Queries
+	wa             *webauthn.WebAuthn
+	google         *googleClient // nil when Google sign-in is not configured
+	mail           mailer.Sender
+	verifyRecovery func(encoded, code string) bool
+	recoveryKey    []byte // keys recovery-code lookup hashes
+	decoyKey       []byte // keys decoy credential IDs for unknown addresses
 }
 
 // Register installs routes and, via r.UseApp, the session middleware that
@@ -79,9 +86,16 @@ func newModule(d *server.Deps, o options) (*module, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth: webauthn: %w", err)
 	}
-	m := &module{d: d, q: db.New(d.DB), wa: wa, mail: o.mail}
+	m := &module{
+		d: d, q: db.New(d.DB), wa: wa, mail: o.mail, verifyRecovery: o.verifyRecovery,
+		recoveryKey: token.DeriveKey(d.Config.SecretKey, token.PurposeRecoveryCode),
+		decoyKey:    token.DeriveKey(d.Config.SecretKey, token.PurposePasskeyDecoy),
+	}
 	if m.mail == nil {
 		m.mail = mailer.New(d.Config.SMTP)
+	}
+	if m.verifyRecovery == nil {
+		m.verifyRecovery = token.VerifyRecoveryCode
 	}
 	if g := d.Config.Google; g != nil {
 		m.google = newGoogleClient(o.googleIssuer, g.ClientID, g.ClientSecret, d.Config.AppOrigin.String()+"/auth/google/callback")

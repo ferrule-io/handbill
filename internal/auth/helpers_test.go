@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/ferrule-io/handbill/internal/identity"
 	"github.com/ferrule-io/handbill/internal/mail"
 	"github.com/ferrule-io/handbill/internal/server"
+	"github.com/ferrule-io/handbill/internal/token"
 )
 
 const (
@@ -47,6 +49,8 @@ type env struct {
 	pool   *pgxpool.Pool
 	google *fakeGoogle
 	mail   *fakeMail
+	// verifications counts recovery-code argon2id verifications.
+	verifications atomic.Int64
 }
 
 type envOpts struct {
@@ -77,7 +81,11 @@ func newEnv(t *testing.T, o envOpts) *env {
 	}
 	d := &server.Deps{Config: cfg, Logger: slog.New(slog.DiscardHandler), DB: pool}
 	h, err := server.New(d, appapi.Register, func(r *server.Routes, d *server.Deps) error {
-		if err := register(r, d, options{googleIssuer: issuer, mail: e.mail}); err != nil {
+		verify := func(encoded, code string) bool {
+			e.verifications.Add(1)
+			return token.VerifyRecoveryCode(encoded, code)
+		}
+		if err := register(r, d, options{googleIssuer: issuer, mail: e.mail, verifyRecovery: verify}); err != nil {
 			return err
 		}
 		// Stands in for any other feature reading identity.

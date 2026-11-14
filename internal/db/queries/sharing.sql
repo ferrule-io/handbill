@@ -5,10 +5,11 @@
 
 -- Members ---------------------------------------------------------------
 
--- ListMembers returns a site's members with their primary email (NULL for
--- an account without one): the owner, then managers, then viewers.
+-- ListMembers returns a site's members with their primary email and whether
+-- it is verified (NULL for an account without one): the owner, then
+-- managers, then viewers.
 -- name: ListMembers :many
-SELECT m.user_id, m.role, m.created_at, e.email
+SELECT m.user_id, m.role, m.created_at, e.email, e.verified AS email_verified
 FROM memberships m
 LEFT JOIN emails e ON e.user_id = m.user_id AND e.is_primary
 WHERE m.site_id = @site_id
@@ -56,6 +57,12 @@ UPDATE invites SET consumed_at = now(), consumed_by = @user_id WHERE id = @id;
 -- name: RevokePendingInvitesForEmail :execrows
 UPDATE invites SET revoked_at = now()
 WHERE site_id = @site_id AND email = @email AND consumed_at IS NULL AND revoked_at IS NULL;
+
+-- PendingInviteRolesForEmail returns the roles of an address's unexpired
+-- pending invites to a site, which a re-invite would revoke.
+-- name: PendingInviteRolesForEmail :many
+SELECT DISTINCT role FROM invites
+WHERE site_id = @site_id AND email = @email AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now();
 
 -- name: GetPendingInvite :one
 SELECT * FROM invites

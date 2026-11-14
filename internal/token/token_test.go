@@ -158,7 +158,7 @@ func TestSiteCookie(t *testing.T) {
 
 func TestUploadGrant(t *testing.T) {
 	s := NewSigner(secret)
-	g := UploadGrant{DeploymentID: uuid.New(), SiteID: "abcdefgh2345", Expires: now.Add(10 * time.Minute)}
+	g := UploadGrant{DeploymentID: uuid.New(), SiteID: "abcdefgh2345", UserID: uuid.New(), Expires: now.Add(10 * time.Minute)}
 	v := s.UploadGrant(g)
 	got, err := s.ParseUploadGrant(v, now)
 	if err != nil || got != g {
@@ -212,5 +212,27 @@ func assertInvalid(t *testing.T, what, v string, parse func(string) error) {
 		if err := parse(bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s %s: err = %v, want ErrInvalid", what, name, err)
 		}
+	}
+}
+
+func TestRecoveryCodeLookup(t *testing.T) {
+	key := DeriveKey([]byte(strings.Repeat("k", 32)), PurposeRecoveryCode)
+	code := NewRecoveryCode()
+	h, ok := RecoveryCodeLookup(key, code)
+	if !ok || len(h) != sha256.Size {
+		t.Fatalf("lookup of %q: %x %v", code, h, ok)
+	}
+	// Case, dashes, and whitespace do not matter, as for verification.
+	if h2, _ := RecoveryCodeLookup(key, " "+strings.ToLower(strings.ReplaceAll(code, "-", ""))+"\n"); !bytes.Equal(h, h2) {
+		t.Fatal("normalized forms differ")
+	}
+	if h2, _ := RecoveryCodeLookup(DeriveKey([]byte(strings.Repeat("r", 32)), PurposeRecoveryCode), code); bytes.Equal(h, h2) {
+		t.Fatal("another key gives the same lookup hash")
+	}
+	if _, ok := RecoveryCodeLookup(key, "garbage"); ok {
+		t.Fatal("malformed code accepted")
+	}
+	if bytes.Equal(DeriveKey([]byte("s"), PurposeRecoveryCode), DeriveKey([]byte("s"), PurposePasskeyDecoy)) {
+		t.Fatal("purposes share a key")
 	}
 }

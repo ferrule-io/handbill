@@ -28,9 +28,13 @@ func (m *module) listGrants(w http.ResponseWriter, r *http.Request) error {
 	}
 	out := make([]grantJSON, len(rows))
 	for i, g := range rows {
+		var redirectURI string
+		if len(g.RedirectUris) > 0 {
+			redirectURI = g.RedirectUris[0]
+		}
 		out[i] = grantJSON{
 			ID:         g.ID,
-			Client:     describeClient(g.ClientKey, g.ClientName, g.Registration, g.RedirectUris),
+			Client:     describeClient(g.ClientKey, g.ClientName, g.Registration, redirectURI),
 			CreatedAt:  g.CreatedAt.UTC(),
 			LastUsedAt: g.LastUsedAt,
 		}

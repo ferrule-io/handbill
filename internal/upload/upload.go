@@ -44,21 +44,24 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	if dep.State != "open" {
-		writeErr(w, http.StatusConflict, "deployment_closed", "The deployment is already finalized or abandoned: start a new one with create_deployment.")
+	// The grant is its requester's: it works only while they are the
+	// deployment's creator and can still publish to the site, so a manager
+	// removed or demoted within the grant's lifetime is refused.
+	if !dep.IsCreator(g.UserID) {
+		writeErr(w, http.StatusForbidden, "forbidden", "Only the deployment's creator can upload into it.")
 		return
 	}
-	// Re-check the creator's role now: a manager removed within the grant's
-	// lifetime is refused.
-	var role rbac.Role
-	if dep.CreatedBy.Valid {
-		if role, err = h.sites.Role(r.Context(), dep.SiteID, dep.CreatedBy.UUID); err != nil {
-			h.fail(w, err)
-			return
-		}
+	role, err := h.sites.Role(r.Context(), dep.SiteID, g.UserID)
+	if err != nil {
+		h.fail(w, err)
+		return
 	}
 	if !rbac.Can(role, rbac.Publish) {
-		writeErr(w, http.StatusForbidden, "forbidden", "The deployment's creator can no longer publish to this site.")
+		writeErr(w, http.StatusForbidden, "forbidden", "You can no longer publish to this site.")
+		return
+	}
+	if dep.State != "open" {
+		writeErr(w, http.StatusConflict, "deployment_closed", "The deployment is already finalized or abandoned: start a new one with create_deployment.")
 		return
 	}
 
@@ -76,7 +79,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnsupportedMediaType, "unsupported_format", "Upload a .tar.gz or .zip archive.")
 		return
 	}
-	err = h.sites.AddArchive(r.Context(), id, body, format)
+	err = h.sites.AddArchive(r.Context(), id, g.UserID, body, format)
 	var ie *sites.InputError
 	switch {
 	case err == nil:
@@ -89,6 +92,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_archive", ie.Msg)
 	case errors.Is(err, sites.ErrDeploymentClosed):
 		writeErr(w, http.StatusConflict, "deployment_closed", "The deployment is already finalized or abandoned: start a new one with create_deployment.")
+	case errors.Is(err, sites.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "not_found", "The deployment was not found.")
+	case errors.Is(err, sites.ErrNotCreator):
+		writeErr(w, http.StatusForbidden, "forbidden", "Only the deployment's creator can upload into it.")
 	default:
 		h.fail(w, err)
 	}

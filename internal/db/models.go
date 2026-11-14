@@ -220,6 +220,7 @@ type RecoveryCode struct {
 	CodeHash   string
 	CreatedAt  time.Time
 	ConsumedAt *time.Time
+	LookupHash []byte
 }
 
 type Session struct {

@@ -18,6 +18,8 @@ WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
 RETURNING id, token_hash, grant_id, redirect_uri, code_challenge, code_challenge_method, resource, scopes, created_at, expires_at, consumed_at
 `
 
+// ConsumeAuthorizationCode marks a code used. It runs in the transaction
+// that issues the code's tokens, so the row stays locked until they exist.
 func (q *Queries) ConsumeAuthorizationCode(ctx context.Context, tokenHash []byte) (OauthAuthorizationCode, error) {
 	row := q.db.QueryRow(ctx, consumeAuthorizationCode, tokenHash)
 	var i OauthAuthorizationCode
@@ -300,7 +302,7 @@ func (q *Queries) DeleteGrant(ctx context.Context, arg DeleteGrantParams) (int64
 
 const getAccessTokenPrincipal = `-- name: GetAccessTokenPrincipal :one
 SELECT t.id, t.grant_id, t.family_id, t.scopes, t.expires_at,
-       g.user_id, c.client_id AS client_key, c.client_name,
+       g.user_id, c.client_id AS client_key, c.client_name, c.registration,
        e.email, coalesce(e.verified, false)::boolean AS email_verified
 FROM oauth_access_tokens t
 JOIN oauth_grants g ON g.id = t.grant_id
@@ -324,6 +326,7 @@ type GetAccessTokenPrincipalRow struct {
 	UserID        uuid.UUID
 	ClientKey     string
 	ClientName    string
+	Registration  string
 	Email         *string
 	EmailVerified bool
 }
@@ -341,19 +344,22 @@ func (q *Queries) GetAccessTokenPrincipal(ctx context.Context, arg GetAccessToke
 		&i.UserID,
 		&i.ClientKey,
 		&i.ClientName,
+		&i.Registration,
 		&i.Email,
 		&i.EmailVerified,
 	)
 	return i, err
 }
 
-const getAuthorizationCodeByHash = `-- name: GetAuthorizationCodeByHash :one
-SELECT id, token_hash, grant_id, redirect_uri, code_challenge, code_challenge_method, resource, scopes, created_at, expires_at, consumed_at FROM oauth_authorization_codes WHERE token_hash = $1
+const getAuthorizationCodeForUpdate = `-- name: GetAuthorizationCodeForUpdate :one
+SELECT id, token_hash, grant_id, redirect_uri, code_challenge, code_challenge_method, resource, scopes, created_at, expires_at, consumed_at FROM oauth_authorization_codes WHERE token_hash = $1 FOR UPDATE
 `
 
-// GetAuthorizationCodeByHash detects reuse after a failed consume.
-func (q *Queries) GetAuthorizationCodeByHash(ctx context.Context, tokenHash []byte) (OauthAuthorizationCode, error) {
-	row := q.db.QueryRow(ctx, getAuthorizationCodeByHash, tokenHash)
+// GetAuthorizationCodeForUpdate detects reuse after a failed consume. The
+// lock waits for an exchange still issuing tokens, so revoking the family
+// afterwards catches them.
+func (q *Queries) GetAuthorizationCodeForUpdate(ctx context.Context, tokenHash []byte) (OauthAuthorizationCode, error) {
+	row := q.db.QueryRow(ctx, getAuthorizationCodeForUpdate, tokenHash)
 	var i OauthAuthorizationCode
 	err := row.Scan(
 		&i.ID,
@@ -373,7 +379,7 @@ func (q *Queries) GetAuthorizationCodeByHash(ctx context.Context, tokenHash []by
 
 const getAuthorizationRequest = `-- name: GetAuthorizationRequest :one
 SELECT r.id, r.client_id, r.redirect_uri, r.expires_at,
-       c.client_id AS client_key, c.client_name, c.registration, c.redirect_uris
+       c.client_id AS client_key, c.client_name, c.registration
 FROM oauth_authorization_requests r
 JOIN oauth_clients c ON c.id = r.client_id
 WHERE r.token_hash = $1 AND r.user_id = $2 AND r.expires_at > now()
@@ -392,7 +398,6 @@ type GetAuthorizationRequestRow struct {
 	ClientKey    string
 	ClientName   string
 	Registration string
-	RedirectUris []string
 }
 
 func (q *Queries) GetAuthorizationRequest(ctx context.Context, arg GetAuthorizationRequestParams) (GetAuthorizationRequestRow, error) {
@@ -406,7 +411,6 @@ func (q *Queries) GetAuthorizationRequest(ctx context.Context, arg GetAuthorizat
 		&i.ClientKey,
 		&i.ClientName,
 		&i.Registration,
-		&i.RedirectUris,
 	)
 	return i, err
 }

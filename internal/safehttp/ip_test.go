@@ -130,6 +130,45 @@ func TestIPClassifierTable(t *testing.T) {
 		// IPv4-compatible IPv6 (::/96 deprecated)
 		{"Compat loopback ::127.0.0.1 default", "::127.0.0.1", false, false, true},
 		{"Compat metadata ::169.254.169.254", "::169.254.169.254", false, false, true},
+		{"Compat public ::8.8.8.8", "::8.8.8.8", false, false, false},
+
+		// Previous bypasses: NAT64 local-use prefix and Teredo.
+		{"NAT64 local-use 64:ff9b:1::a9fe:a9fe", "64:ff9b:1::a9fe:a9fe", false, false, true},
+		{"NAT64 local-use 64:ff9b:1::808:808", "64:ff9b:1::808:808", false, false, true},
+		{"Teredo 2001::1", "2001::1", false, false, true},
+		{"Teredo 2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001:0:4136:e378:8000:63bf:3fff:fdd2", false, false, true},
+
+		// IPv4 special-purpose blocks not globally reachable.
+		{"0.0.0.0/8 0.1.2.3", "0.1.2.3", false, false, true},
+		{"192.0.0.0/24 192.0.0.9", "192.0.0.9", false, false, true},
+		{"192.0.0.0/24 192.0.0.255", "192.0.0.255", false, false, true},
+		{"6to4 relay 192.88.99.255", "192.88.99.255", false, false, true},
+		{"Class E 255.255.255.254", "255.255.255.254", false, false, true},
+		{"multicast 224.0.0.0", "224.0.0.0", false, false, true},
+		{"CGNAT private allowed", "100.64.0.1", false, true, true},
+
+		// IPv6 special-purpose blocks and space outside 2000::/3.
+		{"IPv6 discard 100::ffff", "100::ffff", false, false, true},
+		{"IPv6 dummy 100:0:0:1::1", "100:0:0:1::1", false, false, true},
+		{"IETF protocol 2001:1::1", "2001:1::1", false, false, true},
+		{"ORCHID 2001:10::1", "2001:10::1", false, false, true},
+		{"ORCHIDv2 2001:20::1", "2001:20::1", false, false, true},
+		{"IPv6 benchmark 2001:2:0:ffff::1", "2001:2:0:ffff::1", false, false, true},
+		{"doc IPv6 2001:db8:ffff::1", "2001:db8:ffff::1", false, false, true},
+		{"doc IPv6 3fff::1", "3fff::1", false, false, true},
+		{"doc IPv6 3fff:fff::1", "3fff:fff::1", false, false, true},
+		{"public near doc 3fff:1000::1", "3fff:1000::1", false, false, false},
+		{"6to4 public 2002:808:808::1", "2002:808:808::1", false, false, true},
+		{"SRv6 SID 5f00::1", "5f00::1", false, false, true},
+		{"reserved 4000::1", "4000::1", false, false, true},
+		{"reserved 1::1", "1::1", false, false, true},
+		{"site-local fec0::1 private allowed", "fec0::1", false, true, true},
+		{"link-local fe80::1 loopback allowed", "fe80::1", true, true, true},
+		{"multicast ff0e::1", "ff0e::1", false, false, true},
+		{"zoned link-local fe80::1%eth0", "fe80::1%eth0", false, false, true},
+		{"zoned Teredo 2001::1%eth0", "2001::1%eth0", false, false, true},
+		{"zoned public 2606:4700::1%eth0", "2606:4700::1%eth0", false, false, false},
+		{"public near Teredo 2001:200::1", "2001:200::1", false, false, false},
 	}
 
 	for _, tt := range tests {

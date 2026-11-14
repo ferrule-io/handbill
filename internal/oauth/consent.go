@@ -44,13 +44,15 @@ var errRequestNotFound = appapi.NewError(http.StatusNotFound, "request_not_found
 	"This request expired or belongs to another account. Start the connection again from your app.")
 
 // describeClient is how the consent screen and the grants list show a
-// client. A CIMD client's host is its client_id URL's host; a DCR client
-// is known only by its first redirect URI's host and is unverified.
-func describeClient(clientID, name, registration string, redirectURIs []string) consentClient {
+// client. A CIMD client's host is its client_id URL's host. A DCR client is
+// unverified and may register any redirect URI, so it is known only by
+// redirectURI's host: on the consent screen the one this request uses, on
+// the grants list its first registered one.
+func describeClient(clientID, name, registration, redirectURI string) consentClient {
 	c := consentClient{ClientID: clientID, Name: name, Verified: registration == registrationCIMD}
 	hostOf := clientID
-	if !c.Verified && len(redirectURIs) > 0 {
-		hostOf = redirectURIs[0]
+	if !c.Verified {
+		hostOf = redirectURI
 	}
 	if u, err := url.Parse(hostOf); err == nil {
 		c.Host = u.Host
@@ -80,7 +82,7 @@ func (m *module) getConsent(w http.ResponseWriter, r *http.Request) error {
 		redirect.Host = u.Host
 	}
 	appapi.WriteJSON(w, http.StatusOK, map[string]any{"request": consentRequest{
-		Client:               describeClient(req.ClientKey, req.ClientName, req.Registration, req.RedirectUris),
+		Client:               describeClient(req.ClientKey, req.ClientName, req.Registration, req.RedirectUri),
 		Redirect:             redirect,
 		Account:              consentAccount{Email: user.Email},
 		PreviouslyAuthorized: prev,

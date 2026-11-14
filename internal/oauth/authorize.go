@@ -17,85 +17,77 @@ import (
 	"github.com/ferrule-io/handbill/internal/token"
 )
 
-// authorize is GET /oauth/authorize (plan §4.3). Errors that cannot be
-// trusted to the redirect URI go to the consent page's error card; the
-// rest are redirected to the client with error, state, and iss.
+// authorize is GET /oauth/authorize (plan §4.3). Every error goes to the
+// consent page's error card, never to the redirect URI: the user has not
+// seen the consent screen yet, and a client can register any https
+// redirect URI (RFC 9700 §4.11.1). The codes are OAuth error codes.
 func (m *module) authorize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	q := r.URL.Query()
-
-	// Phase A: errors that must not redirect.
-	consentError := func(code string) {
+	fail := func(code string) {
 		http.Redirect(w, r, "/consent?error="+url.QueryEscape(code), http.StatusSeeOther)
 	}
+
+	// Phase A: the client and its redirect URI.
 	clientID, ok := single(q, "client_id")
 	if !ok || clientID == "" || len(clientID) > maxClientIDLen {
-		consentError(errInvalidClient)
+		fail(errInvalidClient)
 		return
 	}
 	client, code := m.resolveClient(r.Context(), clientID)
 	if code != "" {
-		consentError(code)
+		fail(code)
 		return
 	}
 	redirectURI, ok := single(q, "redirect_uri")
 	if !ok || len(redirectURI) > maxRedirectURILen || !matchRedirect(client.RedirectUris, redirectURI) {
-		consentError(errInvalidRedirectURI)
+		fail(errInvalidRedirectURI)
 		return
 	}
 
-	// Phase B: errors redirected to the client.
-	iss := Issuer(m.d.Config)
-	// state is echoed only when it appears once and within the limit.
-	var state *string
-	if s, ok := single(q, "state"); ok && len(s) <= maxStateLen {
-		state = &s
-	}
-	fail := func(code, description string) {
-		http.Redirect(w, r, errorRedirectURL(redirectURI, iss, code, description, state), http.StatusFound)
-	}
+	// Phase B: the rest of the request.
 	for _, k := range []string{"response_type", "code_challenge", "code_challenge_method", "resource", "scope", "state", "response_mode"} {
 		if len(q[k]) > 1 {
-			fail("invalid_request", "The "+k+" parameter must not be repeated.")
+			fail("invalid_request")
 			return
 		}
 	}
-	if q.Has("state") && state == nil {
-		fail("invalid_request", "The state parameter is too long.")
-		return
+	var state *string // returned to the client after the consent decision
+	if s, ok := single(q, "state"); ok {
+		if len(s) > maxStateLen {
+			fail("invalid_request")
+			return
+		}
+		state = &s
 	}
 	if q.Has("request") || q.Has("request_uri") {
-		fail("request_not_supported", "Request objects are not supported.")
+		fail("request_not_supported")
 		return
 	}
 	if q.Get("response_type") != "code" {
-		fail("unsupported_response_type", "The response_type must be code.")
+		fail("unsupported_response_type")
 		return
 	}
 	if rm := q.Get("response_mode"); q.Has("response_mode") && rm != "query" {
-		fail("invalid_request", "The response_mode must be query.")
-		return
-	}
-	if q.Get("code_challenge_method") != "S256" {
-		fail("invalid_request", "code_challenge_method must be S256")
+		fail("invalid_request")
 		return
 	}
 	challenge := q.Get("code_challenge")
-	if !validChallenge(challenge) {
-		fail("invalid_request", "code_challenge must be a base64url S256 challenge.")
+	if q.Get("code_challenge_method") != "S256" || !validChallenge(challenge) {
+		fail("invalid_request")
 		return
 	}
 	if q.Has("resource") && !sameResource(q.Get("resource"), Resource(m.d.Config)) {
-		fail("invalid_target", "The only resource is "+Resource(m.d.Config)+".")
+		fail("invalid_target")
 		return
 	}
 	if client.Registration == registrationDCR && !m.d.Config.OAuthDCREnabled {
-		fail("unauthorized_client", "Dynamically registered clients are disabled.")
+		fail("unauthorized_client")
 		return
 	}
 	if !slices.Contains(effectiveGrantTypes(client.Metadata), grantAuthorizationCode) {
-		fail("unauthorized_client", "The client is not registered for the authorization_code grant.")
+		fail("unauthorized_client")
 		return
 	}
 	scopes := keptScopes(q.Get("scope"))
@@ -129,7 +121,7 @@ func (m *module) authorize(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		m.d.Logger.Error("oauth: store authorization request", "err", err)
-		fail("server_error", "The authorization request could not be stored. Try again.")
+		fail("server_error")
 		return
 	}
 	http.Redirect(w, r, "/consent?request="+url.QueryEscape(plaintext), http.StatusSeeOther)
