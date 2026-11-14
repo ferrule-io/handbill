@@ -6,3 +6,6 @@
 # Local storage adapter data in development
 /.data/
 .DS_Store
+# Self-host Compose secrets (deploy/compose/.env.example is the template)
+/deploy/compose/.env
+/deploy/compose/.env.bak

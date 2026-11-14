@@ -1,6 +1,11 @@
-# handbill Helm Chart
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../docs/brand/svg/lockup-horizontal-reversed.svg">
+  <img alt="Handbill" src="../../../docs/brand/svg/lockup-horizontal.svg" width="280">
+</picture>
 
-A Helm chart for **handbill**, a self-hosted output endpoint for agent artifacts (MCP server, web dashboard, and isolated static site file server).
+# Handbill Helm chart
+
+A Helm chart for **Handbill**, self-hosted private hosting for the web pages your AI agents make (MCP server, web dashboard, and isolated static site file server). For a guided walkthrough, including Docker Compose and plain-container installs, see the [self-hosting guide](../../../docs/self-hosting.md).
 
 ## Overview
 
@@ -272,7 +277,7 @@ smtp:
   host: "smtp.sendgrid.net"
   port: 587
   username: "apikey"
-  from: "Agent Dash <notifications@dash.example.com>"
+  from: "Handbill <notifications@dash.example.com>"
   tls: "starttls"  # starttls | tls | none
   existingSecret: "smtp-credentials"
   existingSecretPasswordKey: "password"
