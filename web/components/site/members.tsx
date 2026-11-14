@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDownIcon, ClockIcon, MailIcon, ShieldIcon, UserMinusIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, ClockIcon, MailIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -68,7 +68,7 @@ export function SiteMembers({ site }: { site: Site }) {
                 data-testid="invite-list"
               >
                 {load.data.invites.map((inv) => (
-                  <InviteRow key={inv.id} site={site} invite={inv} onChange={reload} />
+                  <InviteRow key={inv.id} site={site} invite={inv} mailEnabled={load.data.mailEnabled} onChange={reload} />
                 ))}
               </ul>
             </div>
@@ -216,19 +216,53 @@ function MemberRow({ site, member, onChange }: { site: Site; member: Member; onC
   )
 }
 
-function InviteRow({ site, invite, onChange }: { site: Site; invite: PendingInvite; onChange: () => void }) {
-  const [busy, setBusy] = useState(false)
+function InviteRow({
+  site,
+  invite,
+  mailEnabled,
+  onChange,
+}: {
+  site: Site
+  invite: PendingInvite
+  mailEnabled: boolean
+  onChange: () => void
+}) {
+  const [busy, setBusy] = useState<"revoke" | "resend" | null>(null)
   const canRevoke = invite.role === "viewer" ? can.manageViewers(site.role) : can.manageManagers(site.role)
 
   async function revoke() {
-    setBusy(true)
+    setBusy("revoke")
     try {
       await api(`/app-api/sites/${site.id}/members/${invite.id}`, { method: "DELETE" })
       toast.success(`Invite for ${invite.email} revoked`)
       onChange()
     } catch (err) {
       toast.error(errorMessage(err))
-      setBusy(false)
+      setBusy(null)
+    }
+  }
+
+  // Re-inviting the same address replaces the pending invite with a fresh
+  // token and expiry (Service.Invite), so the old link stops working.
+  async function resend() {
+    setBusy("resend")
+    try {
+      const res = await api<{ link: string; emailed: boolean; emailNotSentReason: string | null }>(
+        `/app-api/sites/${site.id}/members`,
+        { method: "POST", body: { email: invite.email, role: invite.role, notify: mailEnabled } },
+      )
+      if (res.emailed) {
+        toast.success(`Invite re-sent to ${invite.email}`)
+      } else {
+        await navigator.clipboard.writeText(res.link).catch(() => {})
+        toast.success(`New invite link for ${invite.email} copied`, {
+          description: res.emailNotSentReason ?? "Email is off; send them the link yourself.",
+        })
+      }
+      onChange()
+    } catch (err) {
+      toast.error(errorMessage(err))
+      setBusy(null)
     }
   }
 
@@ -247,17 +281,30 @@ function InviteRow({ site, invite, onChange }: { site: Site; invite: PendingInvi
         </p>
       </div>
       {canRevoke && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={revoke}
-          disabled={busy}
-          aria-label={`Revoke invite for ${invite.email}`}
-          data-testid="revoke-invite"
-        >
-          {busy ? <Spinner /> : <XIcon />}
-          {busy ? "Revoking…" : "Revoke"}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={resend}
+            disabled={busy !== null}
+            aria-label={`Resend invite to ${invite.email}`}
+            data-testid="resend-invite"
+          >
+            {busy === "resend" ? <Spinner /> : <RotateCwIcon />}
+            {busy === "resend" ? "Resending…" : "Resend"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={revoke}
+            disabled={busy !== null}
+            aria-label={`Revoke invite for ${invite.email}`}
+            data-testid="revoke-invite"
+          >
+            {busy === "revoke" ? <Spinner /> : <XIcon />}
+            {busy === "revoke" ? "Revoking…" : "Revoke"}
+          </Button>
+        </div>
       )}
     </li>
   )
