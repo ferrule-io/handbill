@@ -24,14 +24,12 @@ jobs:
           MINIO_ROOT_PASSWORD: minioadmin
         ports:
           - 9000:9000
-        options: >-
-          server /data
+        command: server /data
       fake-gcs:
         image: fsouza/fake-gcs-server:latest
         ports:
           - 4443:4443
-        options: >-
-          -scheme http -port 4443 -public-host 127.0.0.1:4443 -external-url http://127.0.0.1:4443
+        command: -scheme http -port 4443 -public-host 127.0.0.1:4443 -external-url http://127.0.0.1:4443
       # The oldest PostgreSQL the schema supports (the Helm chart bundles 17).
       postgres:
         image: postgres:17
