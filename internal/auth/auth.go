@@ -70,7 +70,7 @@ func register(r *server.Routes, d *server.Deps, o options) error {
 func newModule(d *server.Deps, o options) (*module, error) {
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          d.Config.AppHost,
-		RPDisplayName: "handbill",
+		RPDisplayName: "Handbill",
 		RPOrigins:     []string{d.Config.AppOrigin.String()},
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			// Discoverable credentials let sign-in skip the email field.

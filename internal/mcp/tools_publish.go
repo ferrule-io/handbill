@@ -162,7 +162,7 @@ func addPublishTools(s *mcpsdk.Server, env *Env) {
 			case reason == sharing.NotSentMailDisabled:
 				out.NotifyResult = "not sent: this server has no email configured; tell the members yourself"
 			case reason == sharing.NotSentSenderUnverified:
-				out.NotifyResult = "not sent: your email address is not verified (verify it in handbill's settings); tell the members yourself"
+				out.NotifyResult = "not sent: your email address is not verified (verify it in Handbill's settings); tell the members yourself"
 			case reason == sharing.NotSentFailed:
 				out.NotifyResult = "not sent: the mail server did not accept the messages; tell the members yourself"
 			default:

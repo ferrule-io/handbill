@@ -39,12 +39,17 @@ type Env struct {
 var toolsets []func(s *mcpsdk.Server, env *Env)
 
 // instructions are the server instructions clients show the model.
-const instructions = `handbill hosts static websites (HTML, CSS, JavaScript, images) that you publish for a person to view at a stable, private URL; no server-side code runs. Viewers sign in to see a site, and only people the owner shares it with can open it. Typical flow: list_sites (reuse an existing site to keep its URL) or create_site -> publish_site for small sites (under ~10 MB per call), or create_deployment -> upload_files / get_upload_url -> finalize_deployment for large ones -> give the user the site's URL. Every publish is kept as a version; rollback_site undoes a bad one.`
+const instructions = `Handbill hosts static websites (HTML, CSS, JavaScript, images) that you publish for a person to view at a stable, private URL; no server-side code runs. Viewers sign in to see a site, and only people the owner shares it with can open it. Typical flow: list_sites (reuse an existing site to keep its URL) or create_site -> publish_site for small sites (under ~10 MB per call), or create_deployment -> upload_files / get_upload_url -> finalize_deployment for large ones -> give the user the site's URL. Every publish is kept as a version; rollback_site undoes a bad one.`
 
 // NewServer returns an MCP server with every toolset. Server logging stays
-// off: it could include file contents.
+// off: it could include file contents. Its icons are the brand app icons
+// the web UI serves publicly.
 func NewServer(env *Env) *mcpsdk.Server {
-	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "handbill", Title: "handbill", Version: version.Version},
+	origin := env.Deps.Config.AppOrigin.String()
+	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "handbill", Title: "Handbill", Version: version.Version, Icons: []mcpsdk.Icon{
+		{Source: origin + "/icons/app-icon-512.png", MIMEType: "image/png", Sizes: []string{"512x512"}, Theme: mcpsdk.IconThemeLight},
+		{Source: origin + "/icons/app-icon-dark-512.png", MIMEType: "image/png", Sizes: []string{"512x512"}, Theme: mcpsdk.IconThemeDark},
+	}},
 		&mcpsdk.ServerOptions{Instructions: instructions})
 	for _, add := range toolsets {
 		add(s, env)

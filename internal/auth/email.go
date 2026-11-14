@@ -31,12 +31,12 @@ func (m *module) sendVerificationEmail(ctx context.Context, emailID uuid.UUID, a
 	link := m.d.Config.AppOrigin.String() + "/verify-email#token=" + plain
 	return m.mail.Send(ctx, mailer.Message{
 		To:      address,
-		Subject: "Confirm your email for handbill",
-		Text: fmt.Sprintf("Confirm that %s is your address on handbill:\n\n%s\n\n"+
+		Subject: "Confirm your email for Handbill",
+		Text: fmt.Sprintf("Confirm that %s is your address on Handbill:\n\n%s\n\n"+
 			"The link works once, for 24 hours. If you didn't create an account, ignore this email.\n", address, link),
-		HTML: fmt.Sprintf(`<p>Confirm that <strong>%s</strong> is your address on handbill.</p>`+
+		HTML: fmt.Sprintf(`<p>Confirm that <strong>%s</strong> is your address on Handbill.</p>`+
 			`<p><a href="%s">Confirm email</a></p>`+
-			`<p style="color:#666">The link works once, for 24 hours. If you didn't create an account, ignore this email.</p>`,
+			`<p style="color:#5d6370">The link works once, for 24 hours. If you didn't create an account, ignore this email.</p>`,
 			html.EscapeString(address), html.EscapeString(link)),
 	})
 }

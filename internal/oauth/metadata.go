@@ -37,7 +37,7 @@ func (m *module) protectedResource(w http.ResponseWriter, r *http.Request) {
 		Resource:               Resource(m.d.Config),
 		AuthorizationServers:   []string{Issuer(m.d.Config)},
 		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "handbill",
+		ResourceName:           "Handbill",
 	})
 }
 
