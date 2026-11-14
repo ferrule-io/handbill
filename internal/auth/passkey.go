@@ -63,7 +63,7 @@ func loadUser(ctx context.Context, q *db.Queries, userID uuid.UUID) (*waUser, er
 	if err != nil {
 		return nil, err
 	}
-	u := &waUser{id: userID, name: "handbill account"}
+	u := &waUser{id: userID, name: "Handbill account"}
 	for _, p := range rows {
 		u.creds = append(u.creds, toCredential(p))
 	}

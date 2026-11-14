@@ -7,8 +7,11 @@ sites Handbill hosts. The mark is a web page drawn as a sheet of US Letter
 paper, pinned up and curling at the corner: something posted for people to
 look at that is still a website.
 
-This pack is the brand reference. It does not change the app: `web/` keeps
-its own theme, `Mark` component, and `app/icon.svg`.
+This pack is the brand reference. The app uses it through
+`web/components/brand/` (mark and lockup in theme colours) and copies of
+`favicon-16.svg`, `favicon.ico`, `app-icon-180.png`, and
+`app-icon-{192,512,dark-512}.png` in `web/app/` and `web/public/icons/`;
+update those copies when the pack changes.
 
 ## Mark
 

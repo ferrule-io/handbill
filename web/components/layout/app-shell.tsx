@@ -90,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
       <footer className="border-t border-border/70">
         <Container size="wide" className="flex h-14 items-center justify-between font-mono text-xs text-muted-foreground">
-          <span>handbill</span>
+          <span>Handbill</span>
           <span>self-hosted output for agents</span>
         </Container>
       </footer>

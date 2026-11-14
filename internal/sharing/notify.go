@@ -65,18 +65,18 @@ func inviteMessage(to, from, title string, role rbac.Role, link string, expires 
 	if role == rbac.Manager {
 		verb = "help manage"
 	}
-	lead := fmt.Sprintf("%s invited you to %s “%s” on handbill.", from, verb, title)
+	lead := fmt.Sprintf("%s invited you to %s “%s” on Handbill.", from, verb, title)
 	action := "Open the invitation to create an account or sign in, and the site is yours to see:"
 	note := fmt.Sprintf("The link works once and expires on %s. If you weren’t expecting this, you can ignore it.", expiry(expires))
 	if granted {
-		action = "Your account already has access. Open the site from handbill:"
+		action = "Your account already has access. Open the site from Handbill:"
 		note = "If you weren’t expecting this, you can ignore it."
 	}
 	return message(to, fmt.Sprintf("%s invited you to “%s”", from, title), lead, action, "Open invitation", link, note)
 }
 
 func transferMessage(to, from, title, link string, expires time.Time) mail.Message {
-	lead := fmt.Sprintf("%s wants to make you the owner of “%s” on handbill.", from, title)
+	lead := fmt.Sprintf("%s wants to make you the owner of “%s” on Handbill.", from, title)
 	action := "Open the link and accept while signed in to the account that should own it. They stay on as a manager."
 	note := fmt.Sprintf("The link works once and expires on %s. If you weren’t expecting this, you can ignore it.", expiry(expires))
 	return message(to, fmt.Sprintf("Ownership of “%s” is waiting for you", title), lead, action, "Review transfer", link, note)
@@ -85,12 +85,12 @@ func transferMessage(to, from, title, link string, expires time.Time) mail.Messa
 func message(to, subject, lead, action, button, link, note string) mail.Message {
 	text := strings.Join([]string{lead, "", action, "", link, "", note, ""}, "\n")
 	e := html.EscapeString
-	body := `<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#1d1b18;max-width:32rem">` +
+	body := `<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#131927;max-width:32rem">` +
 		`<p style="margin:0 0 16px">` + e(lead) + `</p>` +
 		`<p style="margin:0 0 20px">` + e(action) + `</p>` +
-		`<p style="margin:0 0 24px"><a href="` + e(link) + `" style="display:inline-block;background:#c2410c;color:#fff;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:8px">` + e(button) + `</a></p>` +
-		`<p style="margin:0 0 8px;color:#6b665d;font-size:13px">Or paste this address into your browser:<br><span style="word-break:break-all">` + e(link) + `</span></p>` +
-		`<p style="margin:0;color:#6b665d;font-size:13px">` + e(note) + `</p>` +
+		`<p style="margin:0 0 24px"><a href="` + e(link) + `" style="display:inline-block;background:#c12b09;color:#fffbf4;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:8px">` + e(button) + `</a></p>` +
+		`<p style="margin:0 0 8px;color:#5d6370;font-size:13px">Or paste this address into your browser:<br><span style="word-break:break-all">` + e(link) + `</span></p>` +
+		`<p style="margin:0;color:#5d6370;font-size:13px">` + e(note) + `</p>` +
 		`</div>`
 	return mail.Message{To: to, Subject: subject, Text: text, HTML: body}
 }
@@ -130,7 +130,7 @@ func (s *Service) NotifyUpdate(ctx context.Context, siteID string, by uuid.UUID)
 		if r.UserID == by || r.Email == nil {
 			continue
 		}
-		lead := fmt.Sprintf("%s published a new version of “%s” on handbill.", from, site.Title)
+		lead := fmt.Sprintf("%s published a new version of “%s” on Handbill.", from, site.Title)
 		m := message(*r.Email, fmt.Sprintf("“%s” was updated", site.Title), lead,
 			"Open the site to see what changed:", "Open site", link,
 			"You get this because the site is shared with you.")

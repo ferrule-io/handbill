@@ -156,6 +156,11 @@ func contentType(p string) string {
 		return "text/plain; charset=utf-8"
 	case ".html":
 		return "text/html; charset=utf-8"
+	case ".ico":
+		// Distroless images ship no mime tables.
+		return "image/x-icon"
+	case ".webmanifest":
+		return "application/manifest+json"
 	}
 	if ct := mime.TypeByExtension(path.Ext(p)); ct != "" {
 		return ct
@@ -245,9 +250,9 @@ func (h *Handler) write(w http.ResponseWriter, r *http.Request, status int, name
 }
 
 const placeholder = `<!doctype html><html lang="en"><meta charset="utf-8">
-<title>handbill</title>
+<title>Handbill</title>
 <body style="font:16px/1.5 system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem">
-<h1>handbill</h1>
+<h1>Handbill</h1>
 <p>The web UI is not built into this binary. Run <code>make web</code> and rebuild,
 or use the container image.</p>
 </body></html>

@@ -122,7 +122,7 @@ func notSentNote(r sharing.NotSentReason, field string) string {
 	case sharing.NotSentMailDisabled:
 		why = "This server cannot send email"
 	case sharing.NotSentSenderUnverified:
-		why = "Not emailed because your email address is not verified (verify it in handbill's settings)"
+		why = "Not emailed because your email address is not verified (verify it in Handbill's settings)"
 	}
 	return why + ": give " + field + " to them yourself; it works once."
 }

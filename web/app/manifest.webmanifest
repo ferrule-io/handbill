@@ -1,0 +1,13 @@
+{
+  "name": "Handbill",
+  "short_name": "Handbill",
+  "description": "Self-hosted static sites published by your agents.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcf9f2",
+  "theme_color": "#fcf9f2",
+  "icons": [
+    { "src": "/icons/app-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/app-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

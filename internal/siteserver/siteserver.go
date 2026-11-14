@@ -554,19 +554,23 @@ const pageHead = `<!doctype html>
 `
 
 const pageStyle = `<style>
-:root{--bg:#f7f5f0;--fg:#1d1b18;--muted:#6b665d;--card:#fffdf9;--ring:#e4dfd4;--accent:#c2410c}
-@media (prefers-color-scheme:dark){:root{--bg:#141311;--fg:#ece8e1;--muted:#9c968c;--card:#1c1a17;--ring:#2e2b26;--accent:#fb923c}}
+:root{--bg:#fcf9f2;--fg:#131927;--muted:#5d6370;--card:#fffdfa;--ring:#ddd8cf;--pin:#e54221}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0e15;--fg:#eee9e0;--muted:#a9a49a;--card:#12151e;--ring:#272b35;--pin:#f5784b}}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);
 font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;padding:1.5rem}
 main{max-width:26rem;width:100%;background:var(--card);border:1px solid var(--ring);border-radius:1rem;padding:2rem;box-shadow:0 1px 2px rgb(0 0 0/.04)}
-p.eyebrow{margin:0 0 .5rem;font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
-h1{margin:0 0 .5rem;font-size:1.35rem;line-height:1.25;font-weight:600}p{margin:0;color:var(--muted)}
+.mark{display:block;height:48px;width:auto;margin:0 0 1.25rem}.mark .ln{stroke:var(--fg)}.mark .pin{fill:var(--pin)}.mark .pin path[fill=none]{stroke:var(--pin)}
+h1{font-family:ui-serif,Georgia,serif;margin:0 0 .5rem;font-size:1.35rem;line-height:1.25;font-weight:600}p{margin:0;color:var(--muted)}
 a{display:inline-block;margin-top:1.25rem;color:var(--fg);font-weight:600;text-underline-offset:3px}
 </style>`
 
-var pageTmpl = template.Must(template.New("page").Parse(pageHead + `<title>{{.Title}} · handbill</title>
+// pageMark is docs/brand/svg/mark.svg with its ink and vermilion moved to
+// the .ln and .pin classes, so pageStyle colours it for the OS theme.
+const pageMark = `<svg class="mark" viewBox="-166.63 -234.68 333.27 424.49" role="img" aria-label="Handbill"><defs><mask id="hb-k" maskUnits="userSpaceOnUse" x="-400" y="-400" width="800" height="800"><rect x="-400" y="-400" width="800" height="800" fill="#fff"/><g transform="translate(6 -131.0) rotate(28) scale(1.0)" fill="#000" stroke="#000" stroke-width="21.0" stroke-linejoin="round" stroke-linecap="round"><ellipse cx="0" cy="-40" rx="25" ry="11"/><path d="M-10,-46 L-7.5,-70 H7.5 L10,-46 Z"/><ellipse cx="0" cy="-78" rx="19" ry="12"/><path d="M0,-32 V-3" fill="none" stroke-width="26.25"/></g></mask></defs><g transform="rotate(-7)"><g mask="url(#hb-k)" fill="none" class="ln" stroke-width="7.0" stroke-linecap="round" stroke-linejoin="round"><path d="M-127.5,84 V-151.0 Q-127.5,-165.0 -113.5,-165.0 H113.5 Q127.5,-165.0 127.5,-151.0 V151.0 Q127.5,165.0 113.5,165.0 H-26 C-88,165.0 -127.5,136 -127.5,84 Z" fill="none"/><path d="M-127.5,84 C-105.5,80 -85.5,82 -79.5,100 C-71.5,128 -57.5,157.0 -26,165.0"/><path d="M-127.5,-127.0 H127.5"/><path d="M-107.5,-146.0 h12"/><path d="M-81.5,-146.0 h12"/><path d="M-55.5,-146.0 h12"/><path d="M-101.5,-103.0 h203.0 v30 h-203.0 Z"/><path d="M-101.5,-51.0 h84 v84 h-84 Z M-101.5,-51.0 l84,84 M-17.5,-51.0 l-84,84"/><path d="M2.5,-43.0 H101.5"/><path d="M2.5,-20.0 H101.5"/><path d="M2.5,3.0 H101.5"/><path d="M2.5,26.0 H57.5"/><path d="M-101.5,67.0 H101.5"/><path d="M-49.5,91.0 H101.5"/><path d="M-35.5,115.0 H101.5"/><path d="M-23.5,139.0 H57.5"/></g><g transform="translate(6 -131.0) rotate(28) scale(1.0)" class="pin"><ellipse cx="0" cy="-40" rx="25" ry="11"/><path d="M-10,-46 L-7.5,-70 H7.5 L10,-46 Z"/><ellipse cx="0" cy="-78" rx="19" ry="12"/><path d="M0,-32 V-3" fill="none" stroke-width="5.25" stroke-linecap="round"/></g></g></svg>`
+
+var pageTmpl = template.Must(template.New("page").Parse(pageHead + `<title>{{.Title}} · Handbill</title>
 ` + pageStyle + `</head><body><main>
-<p class="eyebrow">handbill</p><h1>{{.Title}}</h1><p>{{.Message}}</p>
+` + pageMark + `<h1>{{.Title}}</h1><p>{{.Message}}</p>
 {{if .Link}}<a href="{{.Link}}">Try again</a>{{end}}
 </main></body></html>`))
 
@@ -578,8 +582,8 @@ const shareOpenerScript = `(function(){var t=new URLSearchParams(location.hash.s
 	`var f=document.getElementById("share");f.elements.token.value=t;f.submit()})()`
 
 var (
-	shareOpenerPage = pageHead + "<title>Opening site · handbill</title>\n" + pageStyle + `</head><body><main>
-<p class="eyebrow">handbill</p><h1>Opening site</h1><p id="msg">One moment…</p>
+	shareOpenerPage = pageHead + "<title>Opening site · Handbill</title>\n" + pageStyle + `</head><body><main>
+` + pageMark + `<h1>Opening site</h1><p id="msg">One moment…</p>
 <noscript><p>Turn on JavaScript to open this link.</p></noscript>
 <form id="share" method="post" action="/_auth/share"><input type="hidden" name="token"></form>
 <script>` + shareOpenerScript + `</script>
