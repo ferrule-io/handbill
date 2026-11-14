@@ -104,7 +104,7 @@ export function Transfer({ site }: { site: Site }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="h-10 flex-1"
+              className="h-10 sm:flex-1"
             />
             <Button type="submit" variant="destructive" size="lg" className="h-10" disabled={email.trim() === ""} data-testid="start-transfer">
               <ArrowRightLeftIcon /> Transfer ownership

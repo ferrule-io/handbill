@@ -82,7 +82,7 @@ export function InviteForm({
               onChange={(e) => setEmail(e.target.value)}
               required
               disabled={busy}
-              className="h-10 flex-1"
+              className="h-10 sm:flex-1"
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? "invite-error" : undefined}
             />

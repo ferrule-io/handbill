@@ -40,7 +40,7 @@ export function AuthShell({
       </aside>
       <div className="relative flex flex-col">
         <div className="flex items-center justify-between p-5 sm:p-8">
-          <Link href="/" className="rounded-md lg:invisible">
+          <Link href="/" className="flex items-center rounded-md pointer-coarse:min-h-11 lg:invisible">
             <Wordmark />
           </Link>
           <ThemeToggle />

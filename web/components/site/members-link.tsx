@@ -58,7 +58,7 @@ export function IssuedLink({
           aria-label="Link"
           data-testid="issued-link"
           onFocus={(e) => e.currentTarget.select()}
-          className="h-10 min-w-0 flex-1 rounded-lg bg-card px-3 font-mono text-[0.8rem] text-foreground ring-1 ring-input outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:h-11"
+          className="h-10 min-w-0 rounded-lg bg-card px-3 font-mono text-[0.8rem] text-foreground ring-1 ring-input outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:h-11 sm:flex-1"
         />
         <CopyButton
           value={link}

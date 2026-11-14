@@ -53,7 +53,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </a>
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur-md supports-backdrop-filter:bg-background/65">
         <Container size="wide" className="flex h-15 items-center gap-3 sm:gap-6">
-          <Link href="/" className="flex items-center rounded-md pointer-coarse:min-h-11" aria-label="Handbill, your sites">
+          <Link
+            href="/"
+            className="flex items-center justify-center rounded-md pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            aria-label="Handbill, your sites"
+          >
             <Wordmark collapse />
           </Link>
           <nav aria-label="Main" className="flex items-center gap-1">

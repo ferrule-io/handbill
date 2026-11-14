@@ -13,7 +13,7 @@ export default function NotFound() {
   return (
     <div className="bg-press flex min-h-svh flex-col">
       <div className="p-5 sm:p-8">
-        <Link href="/" className="rounded-md">
+        <Link href="/" className="inline-flex items-center rounded-md pointer-coarse:min-h-11">
           <Wordmark />
         </Link>
       </div>

@@ -90,7 +90,7 @@ export function LoginForm() {
               No email needed: your browser shows the passkeys it has for this site.{" "}
               <button
                 type="button"
-                className="text-foreground underline decoration-border underline-offset-2 hover:decoration-brand"
+                className="text-foreground underline decoration-border underline-offset-2 hover:decoration-brand pointer-coarse:-my-3.5 pointer-coarse:inline-block pointer-coarse:py-3.5"
                 onClick={() => {
                   setMode("email")
                   setError(null)
@@ -131,7 +131,7 @@ export function LoginForm() {
             <PasskeyNote>
               <button
                 type="button"
-                className="text-foreground underline decoration-border underline-offset-2 hover:decoration-brand"
+                className="text-foreground underline decoration-border underline-offset-2 hover:decoration-brand pointer-coarse:-my-3.5 pointer-coarse:inline-block pointer-coarse:py-3.5"
                 onClick={() => {
                   setMode("passkey")
                   setError(null)

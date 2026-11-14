@@ -44,7 +44,7 @@ export function SiteOverview({
               href={site.url}
               target="_blank"
               rel="noreferrer"
-              className="truncate rounded-sm font-mono text-[0.85rem] underline-offset-4 hover:underline"
+              className="truncate rounded-sm font-mono text-[0.85rem] underline-offset-4 hover:underline pointer-coarse:py-3.5"
             >
               {site.url}
             </a>
