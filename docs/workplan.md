@@ -730,10 +730,21 @@ tokens, and of DCR clients without grants (W5 left both here).
   binaries (`go run` went through the mise shim, which replaced the
   server's `DATABASE_URL`/`STORAGE_*` with `mise.toml`'s), then proves they
   share the server's database and storage through a public-link probe site.
-- Flakes (open): `auth.spec.ts` fails while `go test -race ./...` runs on
-  the same machine. Server requests then take seconds (`/app-api/me` 5.8 s,
-  recovery-code issue 2.6 s observed) against Playwright's 5 s
-  expectations. Moving Go tests to compose's `postgres-test` (port 55433,
-  tmpfs, fsync off; `make db-up` starts both) keeps their database churn
-  off the dev database, but the failures remain under CPU load (1–3 of 47
-  per run), so the cause is not only the shared database. Not fixed.
+- Flakes, root causes:
+  - `auth.TestCSRFAndOrigin` "wrong token: 200" was a test bug, not a CSRF
+    bypass: the test forged a token as `"x" + token[1:]`, which is the real
+    token whenever it starts with "x" (1 in 64). It now changes the first
+    character to a different one.
+  - `routing.spec.ts` CSP test: signed in, `/login`, `/login/recover`, and
+    `/signup` forward the visitor with `location.replace` after
+    `/app-api/me`; the test read page state or started the next `goto`
+    while that navigation ran ("execution context destroyed",
+    `ERR_ABORTED`). It now waits for each page's final URL and collects
+    violations through an exposed function.
+  - `auth.spec.ts` under a parallel `go test -race`: the steps that wait on
+    argon2id work (issuing ten recovery codes, recovery sign-in) took over
+    Playwright's 5 s on a loaded machine; they get a 30 s wait
+    (`argon2Step`). Go tests use compose's `postgres-test` (55433), and the
+    Playwright global setup refuses a server database on that instance.
+  - `internal/sites` cleanup timeout: not reproduced (`-count=20 -race`,
+    against both instances, under parallel load).

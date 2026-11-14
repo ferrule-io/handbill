@@ -122,35 +122,46 @@ test("site hosts do not serve the UI", async ({ request, baseURL }) => {
 test("every page runs under its CSP without violations", async ({ page }) => {
   // The CSP allows only each page's own inline scripts, by hash; a missing
   // hash would block Next's bootstrap and leave the page unhydrated.
+  // Violations are reported to the test as they happen, so ones raised by a
+  // page that then navigates away are kept too.
+  const violations: string[] = []
+  await page.exposeFunction("__reportCSP", (v: string) => violations.push(v))
   await page.addInitScript(() => {
-    const w = window as unknown as { __csp: string[] }
-    w.__csp = []
-    document.addEventListener("securitypolicyviolation", (e) => w.__csp.push(`${e.violatedDirective} ${e.blockedURI}`))
+    // exposeFunction installs __reportCSP on every document.
+    const w: Window & { __reportCSP?: (v: string) => void } = window
+    document.addEventListener("securitypolicyviolation", (e) =>
+      w.__reportCSP?.(`${location.pathname}: ${e.violatedDirective} ${e.blockedURI}`)
+    )
   })
   const consoleViolations: string[] = []
   page.on("console", (msg) => {
     if (msg.text().includes("Content Security Policy")) consoleViolations.push(msg.text())
   })
-  const paths = [
-    `/site?id=${id}`,
-    "/",
-    "/settings/security",
-    "/login",
-    "/login/recover",
-    "/signup",
-    "/invite",
-    "/verify-email",
-    "/consent?error=invalid_request",
-    "/no-such-page",
+  // [path, where a signed-in visitor ends up]. The sign-in pages send a
+  // signed-in visitor on with a full-page navigation (location.replace)
+  // once /app-api/me answers; waiting for it keeps that navigation from
+  // destroying the page under a later check or aborting the next goto.
+  const paths: [string, string][] = [
+    [`/site?id=${id}`, `/site?id=${id}`],
+    ["/", "/"],
+    ["/settings/security", "/settings/security"],
+    ["/login", "/"],
+    ["/login/recover", "/"],
+    ["/signup", "/"],
+    ["/invite", "/invite"],
+    ["/verify-email", "/verify-email"],
+    ["/consent?error=invalid_request", "/consent?error=invalid_request"],
+    ["/no-such-page", "/no-such-page"],
   ]
-  for (const path of paths) {
+  for (const [path, lands] of paths) {
     const res = await page.goto(path)
     const csp = res?.headers()["content-security-policy"] ?? ""
     expect(csp, path).toContain("frame-ancestors 'none'")
     expect(csp, path).toMatch(/script-src 'self'( 'sha256-[A-Za-z0-9+/=]+')+;/)
+    await expect(page, path).toHaveURL(lands)
     // Hydrated: Next's router is live.
     await page.waitForFunction(() => "next" in window)
-    expect(await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp), path).toEqual([])
   }
+  expect(violations).toEqual([])
   expect(consoleViolations).toEqual([])
 })
