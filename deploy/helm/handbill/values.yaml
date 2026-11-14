@@ -13,8 +13,8 @@ strategy: {}
 
 
 image:
-  # Container image repository (no invented registry)
-  repository: handbill
+  # Published release image; the tag defaults to the chart appVersion.
+  repository: ghcr.io/ferrule-io/handbill
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""

@@ -55,6 +55,7 @@ jobs:
         with:
           images: ghcr.io/ferrule-io/handbill
           tags: |
+            type=semver,pattern={{version}}
             type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern=latest,enable=${{ !contains(github.ref_name, '-') }}
@@ -135,6 +136,38 @@ jobs:
           helm package deploy/helm/handbill --destination .cr-release-packages
           PKG_PATH=$(find .cr-release-packages -name "handbill-*.tgz" -print -quit)
           echo "package_path=${PKG_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        # v3.3.0
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify default chart images resolve
+        # The pushed chart must install as-is: every image its default
+        # values render has to exist in its registry.
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        env:
+          PKG_PATH: ${{ steps.package.outputs.package_path }}
+        run: |
+          mapfile -t refs < <(helm template handbill "$PKG_PATH" \
+            | sed -nE 's/^[[:space:]]*(- )?image:[[:space:]]*"?([^"[:space:]]+)"?.*$/\2/p' | sort -u)
+          if [ "${#refs[@]}" -eq 0 ]; then
+            echo "::error::no image references rendered from $PKG_PATH"
+            exit 1
+          fi
+          failed=0
+          for ref in "${refs[@]}"; do
+            echo "Checking $ref"
+            if ! docker buildx imagetools inspect "$ref" > /dev/null; then
+              echo "::error::chart default image does not resolve: $ref"
+              failed=1
+            fi
+          done
+          exit "$failed"
 
       - name: Push Helm chart to GHCR OCI registry
         if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}

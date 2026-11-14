@@ -398,8 +398,8 @@ To release a new version of Handbill:
    git push origin v0.1.0
    ```
 3. The `.github/workflows/release.yaml` workflow triggers on tag push:
-   - **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile` with `VERSION`/`COMMIT` build args (reported by `handbill --version`, the startup log, and the MCP server info), tags them as `vX.Y.Z`, `X.Y`, and `latest` (for non-prerelease tags), and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
-   - **Chart**: Synchronizes `version` and `appVersion` in `deploy/helm/handbill/Chart.yaml` to the tag version, runs `helm lint`, packages the chart, and pushes the OCI package to `oci://ghcr.io/ferrule-io/charts`.
+   - **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile` with `VERSION`/`COMMIT` build args (reported by `handbill --version`, the startup log, and the MCP server info), tags them as `X.Y.Z` (the chart's default tag, equal to `appVersion`), `vX.Y.Z`, `X.Y`, and `latest` (for non-prerelease tags), and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
+   - **Chart**: Synchronizes `version` and `appVersion` in `deploy/helm/handbill/Chart.yaml` to the tag version, runs `helm lint`, packages the chart, renders the package with default values and fails unless every rendered `image:` resolves in its registry (`docker buildx imagetools inspect`), then pushes the OCI package to `oci://ghcr.io/ferrule-io/charts`.
    - **GitHub Release**: Drafts and publishes a GitHub release with automatically generated changelog release notes and attaches the packaged `handbill-*.tgz` chart bundle.
 
 ### Dry Runs
@@ -411,7 +411,7 @@ Dry runs can be triggered manually via `workflow_dispatch` in GitHub Actions by 
 | Parameter | Description | Default |
 |---|---|---|
 | `replicaCount` | Number of handbill replicas | `1` |
-| `image.repository` | Container image repository | `handbill` |
+| `image.repository` | Container image repository | `ghcr.io/ferrule-io/handbill` |
 | `image.tag` | Image tag (defaults to `.Chart.AppVersion`) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `imagePullSecrets` | Secrets for private image registries | `[]` |
