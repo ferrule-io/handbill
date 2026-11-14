@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, development]
+    branches: [development]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read

@@ -385,26 +385,21 @@ by binding the PVC to the snapshot.
 
 ## Releasing
 
-Releases are driven entirely by git tags.
+Every push to `main` publishes a release; nobody creates tags by hand.
 
-### Tagging and Publishing
+### Publishing
 
-To release a new version of Handbill:
+Merging (or pushing) to `main` runs `.github/workflows/release.yaml`:
 
-1. Ensure all changes and CI checks pass on `main`.
-2. Tag the release commit following semver (`vX.Y.Z`):
-   ```bash
-   git tag -a v0.1.0 -m "Release v0.1.0"
-   git push origin v0.1.0
-   ```
-3. The `.github/workflows/release.yaml` workflow triggers on tag push:
-   - **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile` with `VERSION`/`COMMIT` build args (reported by `handbill --version`, the startup log, and the MCP server info), tags them as `X.Y.Z` (the chart's default tag, equal to `appVersion`), `vX.Y.Z`, `X.Y`, and `latest` (for non-prerelease tags), and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
-   - **Chart**: Synchronizes `version` and `appVersion` in `deploy/helm/handbill/Chart.yaml` to the tag version, runs `helm lint`, packages the chart, renders the package with default values and fails unless every rendered `image:` resolves in its registry (`docker buildx imagetools inspect`), then pushes the OCI package to `oci://ghcr.io/ferrule-io/charts`.
-   - **GitHub Release**: Drafts and publishes a GitHub release with automatically generated changelog release notes and attaches the packaged `handbill-*.tgz` chart bundle.
+1. **CI**: Runs the full CI workflow (`ci.yaml`) on the pushed commit; nothing publishes unless it passes.
+2. **Version**: Takes the highest `vX.Y.Z` tag in the repository and bumps the patch (`v0.1.2` → `0.1.3`). A commit that already carries a `vX.Y.Z` tag is not released again. Releases are patch-only; `main` runs are serialized so each sees the previous run's tag.
+3. **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile` with `VERSION=vX.Y.Z`/`COMMIT` build args (reported by `handbill --version`, the startup log, and the MCP server info), tags them as `X.Y.Z` (the chart's default tag, equal to `appVersion`), `vX.Y.Z`, `X.Y`, and `latest`, and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
+4. **Chart**: Stamps `version` and `appVersion` in `deploy/helm/handbill/Chart.yaml` with `X.Y.Z` at package time (the committed `Chart.yaml` keeps its placeholder), runs `helm lint`, packages the chart, renders the package with default values and fails unless every rendered `image:` resolves in its registry (`docker buildx imagetools inspect`), then pushes the OCI package to `oci://ghcr.io/ferrule-io/charts`.
+5. **GitHub Release**: Creates tag `vX.Y.Z` at the built commit and a GitHub release with generated release notes and the packaged `handbill-*.tgz` chart attached. The tag exists only after the image and chart are published; if a run fails, "Re-run failed jobs" retries with the same version.
 
 ### Dry Runs
 
-Dry runs can be triggered manually via `workflow_dispatch` in GitHub Actions by selecting the `dry_run` option. A dry run verifies multi-arch container building and chart linting/packaging without pushing images or charts to registries or creating a GitHub release.
+Run the Release workflow manually (`workflow_dispatch`, any branch, e.g. `gh workflow run release.yaml --ref <branch>`). A manual run is always a dry run: it runs CI, computes the next version, builds the multi-arch image (tagged `dry-run`), and lints/packages the chart, without logging in, pushing images or charts, or creating a tag or GitHub release.
 
 ## Configuration Reference
 

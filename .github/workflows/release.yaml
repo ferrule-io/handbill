@@ -2,22 +2,71 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Dry run (build but do not push)'
-        required: false
-        default: false
-        type: boolean
+    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
+# Serializes main releases so a queued run sees the previous run's tag. The
+# name must not start with "release": the called CI workflow's group is
+# "Release-<ref>" and group names are case-insensitive.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yaml
+
+  version:
+    name: Compute release version
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      minor: ${{ steps.next.outputs.minor }}
+      publish: ${{ steps.next.outputs.publish }}
+      skip: ${{ steps.next.outputs.skip }}
+    steps:
+      - name: Checkout repository
+        # v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Next patch version
+        id: next
+        # Pushes to main publish; workflow_dispatch (any branch) is a dry run.
+        # The bump uses every repo tag so a version is never reused.
+        run: |
+          set -euo pipefail
+          semver='^v[0-9]+\.[0-9]+\.[0-9]+$'
+          latest=$(git tag --list 'v*' | grep -E "$semver" | sort -V | tail -n1 || true)
+          latest=${latest:-v0.0.0}
+          IFS=. read -r major minor patch <<<"${latest#v}"
+          version="${major}.${minor}.$((patch + 1))"
+          publish=false
+          [ "$GITHUB_EVENT_NAME" = push ] && publish=true
+          skip=false
+          head_tag=$(git tag --points-at HEAD | grep -E "$semver" | sort -V | tail -n1 || true)
+          if [ "$publish" = true ] && [ -n "$head_tag" ]; then
+            echo "::notice::${GITHUB_SHA} is already released as ${head_tag}; nothing to publish"
+            skip=true
+          fi
+          echo "Latest tag ${latest}; next version ${version}; publish=${publish}; skip=${skip}"
+          {
+            echo "version=${version}"
+            echo "minor=${major}.${minor}"
+            echo "publish=${publish}"
+            echo "skip=${skip}"
+          } >> "$GITHUB_OUTPUT"
+
   image:
     name: Build and push container image
+    needs: version
+    if: ${{ needs.version.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -42,7 +91,7 @@ jobs:
       - name: Log in to GitHub Container Registry
         # v3.3.0
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        if: ${{ needs.version.outputs.publish == 'true' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -54,12 +103,14 @@ jobs:
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804
         with:
           images: ghcr.io/ferrule-io/handbill
+          flavor: |
+            latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern=v{{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern=latest,enable=${{ !contains(github.ref_name, '-') }}
-            type=raw,value=dry-run,enable=${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=raw,value=v${{ needs.version.outputs.version }}
+            type=raw,value=${{ needs.version.outputs.minor }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.publish == 'true' }}
+            type=raw,value=dry-run,enable=${{ needs.version.outputs.publish != 'true' }}
 
       - name: Build and push image
         # v6.15.0
@@ -68,14 +119,14 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+          push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           sbom: true
           provenance: mode=max
           # handbill --version, the startup log, and the MCP server version.
           build-args: |
-            VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-{0}', github.sha) }}
+            VERSION=v${{ needs.version.outputs.version }}
             COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -83,21 +134,22 @@ jobs:
       - name: Generate build provenance attestation
         # v2.4.0
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        if: ${{ needs.version.outputs.publish == 'true' }}
         with:
           subject-name: ghcr.io/ferrule-io/handbill
           subject-digest: ${{ steps.build-push.outputs.digest }}
           push-to-registry: true
   chart:
     name: Package and push Helm chart
-    needs: image
+    needs: [version, image]
+    if: ${{ needs.version.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
       chart-package: ${{ steps.package.outputs.package_path }}
-      chart-version: ${{ steps.version.outputs.version }}
+      chart-version: ${{ needs.version.outputs.version }}
     steps:
       - name: Checkout repository
         # v4.2.2
@@ -107,21 +159,10 @@ jobs:
         # v4.3.0
         uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112
 
-      - name: Determine chart and app version
-        id: version
-        run: |
-          REF="${{ github.ref_name }}"
-          if [[ "$REF" =~ ^v([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
-            VER="${BASH_REMATCH[1]}"
-          else
-            VER="0.0.0-dryrun"
-          fi
-          echo "version=${VER}" >> "$GITHUB_OUTPUT"
-
       - name: Update Chart.yaml version and appVersion
         run: |
-          sed -i.bak -E "s/^version:.*/version: ${{ steps.version.outputs.version }}/" deploy/helm/handbill/Chart.yaml
-          sed -i.bak -E "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" deploy/helm/handbill/Chart.yaml
+          sed -i.bak -E "s/^version:.*/version: ${{ needs.version.outputs.version }}/" deploy/helm/handbill/Chart.yaml
+          sed -i.bak -E "s/^appVersion:.*/appVersion: \"${{ needs.version.outputs.version }}\"/" deploy/helm/handbill/Chart.yaml
           rm -f deploy/helm/handbill/Chart.yaml.bak
           git diff deploy/helm/handbill/Chart.yaml
 
@@ -140,7 +181,7 @@ jobs:
       - name: Log in to GitHub Container Registry
         # v3.3.0
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        if: ${{ needs.version.outputs.publish == 'true' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -149,7 +190,7 @@ jobs:
       - name: Verify default chart images resolve
         # The pushed chart must install as-is: every image its default
         # values render has to exist in its registry.
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        if: ${{ needs.version.outputs.publish == 'true' }}
         env:
           PKG_PATH: ${{ steps.package.outputs.package_path }}
         run: |
@@ -170,7 +211,7 @@ jobs:
           exit "$failed"
 
       - name: Push Helm chart to GHCR OCI registry
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+        if: ${{ needs.version.outputs.publish == 'true' }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm push "${{ steps.package.outputs.package_path }}" oci://ghcr.io/ferrule-io/charts
@@ -183,9 +224,9 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: chart
+    needs: [version, chart]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
+    if: ${{ needs.version.outputs.publish == 'true' && needs.version.outputs.skip != 'true' }}
     permissions:
       contents: write
     steps:
@@ -196,8 +237,13 @@ jobs:
 
       - name: Create GitHub Release
         # v2.2.1
+        # Creates tag vX.Y.Z at the built commit, only after image and chart
+        # are published.
         uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda
         with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
             *.tgz
