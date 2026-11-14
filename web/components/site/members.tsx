@@ -254,10 +254,21 @@ function InviteRow({
       if (res.emailed) {
         toast.success(`Invite re-sent to ${invite.email}`)
       } else {
-        await navigator.clipboard.writeText(res.link).catch(() => {})
-        toast.success(`New invite link for ${invite.email} copied`, {
-          description: res.emailNotSentReason ?? "Email is off; send them the link yourself.",
-        })
+        const reason = res.emailNotSentReason ?? "Email is off; send them the link yourself."
+        const copied = await navigator.clipboard.writeText(res.link).then(
+          () => true,
+          () => false,
+        )
+        if (copied) {
+          toast.success(`New invite link for ${invite.email} copied`, { description: reason })
+        } else {
+          // The old link is already dead; keep the new one on screen until dismissed.
+          toast.warning(`New invite link for ${invite.email}`, {
+            description: `${reason} Copy it now: ${res.link}`,
+            duration: Infinity,
+            closeButton: true,
+          })
+        }
       }
       onChange()
     } catch (err) {
