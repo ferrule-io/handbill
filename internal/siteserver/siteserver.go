@@ -160,16 +160,19 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if status == http.StatusOK && !strings.HasSuffix(r.URL.Path, "/") && strings.HasSuffix(fi.Path, "/index.html") {
-		// A directory index: redirect to the slash form so the page's
-		// relative links resolve inside the directory.
-		target := r.URL.EscapedPath() + "/"
-		if r.URL.RawQuery != "" {
-			target += "?" + r.URL.RawQuery
+	if status == http.StatusOK {
+		if target, ok := canonicalPath(r.URL.Path, fi.Path); ok {
+			// Directory indexes live at their slash form so the page's
+			// relative links resolve inside the directory; a stray slash
+			// after a file name is dropped.
+			target = (&url.URL{Path: target}).EscapedPath()
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			w.Header().Set("Cache-Control", "private, no-cache")
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
 		}
-		w.Header().Set("Cache-Control", "private, no-cache")
-		http.Redirect(w, r, target, http.StatusMovedPermanently)
-		return
 	}
 	h.serveFile(w, r, siteID, fi, status)
 }
@@ -195,15 +198,34 @@ func (h *handler) authorize(r *http.Request, siteID string) (sites.Access, bool,
 	return a, Authorized(sc, a), nil
 }
 
-// candidates maps a request path to site paths, in order: "/" and
-// directory paths → index.html; "/foo" → foo, foo/index.html (answered
-// with a redirect to "/foo/"), foo.html.
+// candidates maps a request path to site paths, in order: "/" →
+// index.html; "/dir/" → dir/index.html, then the file dir (a stray slash
+// after a file name); "/foo" → foo, foo/index.html, foo.html.
 func candidates(urlPath string) []string {
 	p := strings.TrimPrefix(urlPath, "/")
-	if p == "" || strings.HasSuffix(p, "/") {
-		return []string{p + "index.html"}
+	if p == "" {
+		return []string{"index.html"}
+	}
+	if strings.HasSuffix(p, "/") {
+		return []string{p + "index.html", strings.TrimSuffix(p, "/")}
 	}
 	return []string{p, p + "/index.html", p + ".html"}
+}
+
+// canonicalPath reports where a request for urlPath that resolved to the
+// site file filePath should redirect: a directory index (dir/index.html,
+// whether requested as "/dir", "/dir/index.html", or "/dir/index.html/")
+// to "/dir/", and a file requested with a trailing slash to the file.
+// "/foo" answered by foo.html is not redirected.
+func canonicalPath(urlPath, filePath string) (string, bool) {
+	if filePath == "index.html" || strings.HasSuffix(filePath, "/index.html") {
+		dir := "/" + strings.TrimSuffix(filePath, "index.html")
+		return dir, urlPath != dir
+	}
+	if strings.HasSuffix(urlPath, "/") {
+		return "/" + filePath, true
+	}
+	return "", false
 }
 
 func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, siteID string, fi sites.FileInfo, status int) {
