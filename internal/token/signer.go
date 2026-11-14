@@ -125,14 +125,16 @@ func (s *Signer) ParseSiteCookie(v string, now time.Time) (SiteCookie, error) {
 	return SiteCookie{SiteID: p.Site, UserID: p.User, LinkGen: p.Gen, Expires: exp}, nil
 }
 
-// UploadGrant authorizes one account to upload an archive into a staged
-// deployment (/api/deployments/<id>/archive). Its validity also requires
+// UploadGrant authorizes one account to upload into a staged deployment:
+// one raw file at Path (/api/deployments/<id>/file), or an archive when
+// Path is empty (/api/deployments/<id>/archive). Its validity also requires
 // the deployment to still be open and UserID to be its creator and still
 // able to publish to the site.
 type UploadGrant struct {
 	DeploymentID uuid.UUID
 	SiteID       string
 	UserID       uuid.UUID // the requester, who must be the deployment's creator
+	Path         string    // set: one raw file at this path (/file); empty: an archive (/archive)
 	Expires      time.Time
 }
 
@@ -140,12 +142,13 @@ type uploadGrantPayload struct {
 	Deployment uuid.UUID `json:"d"`
 	Site       string    `json:"s"`
 	User       uuid.UUID `json:"u"`
+	Path       string    `json:"p,omitempty"`
 	Exp        int64     `json:"e"`
 }
 
 // UploadGrant returns the signed value for g, to carry in an upload URL.
 func (s *Signer) UploadGrant(g UploadGrant) string {
-	return s.sign(purposeUploadGrant, uploadGrantPayload{Deployment: g.DeploymentID, Site: g.SiteID, User: g.UserID, Exp: g.Expires.Unix()})
+	return s.sign(purposeUploadGrant, uploadGrantPayload{Deployment: g.DeploymentID, Site: g.SiteID, User: g.UserID, Path: g.Path, Exp: g.Expires.Unix()})
 }
 
 // ParseUploadGrant verifies a value signed by UploadGrant and not yet
@@ -159,5 +162,5 @@ func (s *Signer) ParseUploadGrant(v string, now time.Time) (UploadGrant, error) 
 	if err != nil {
 		return UploadGrant{}, err
 	}
-	return UploadGrant{DeploymentID: p.Deployment, SiteID: p.Site, UserID: p.User, Expires: exp}, nil
+	return UploadGrant{DeploymentID: p.Deployment, SiteID: p.Site, UserID: p.User, Path: p.Path, Expires: exp}, nil
 }

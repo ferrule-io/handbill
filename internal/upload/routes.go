@@ -15,9 +15,14 @@ import (
 // GrantTTL is how long an upload URL works.
 const GrantTTL = 15 * time.Minute
 
-// URL returns the upload URL for a deployment.
+// URL returns the upload URL for a deployment: the raw-file endpoint when
+// the grant carries a path, the archive endpoint otherwise.
 func URL(c *config.Config, s *token.Signer, g token.UploadGrant) string {
-	return c.AppOrigin.String() + "/api/deployments/" + g.DeploymentID.String() + "/archive?grant=" + url.QueryEscape(s.UploadGrant(g))
+	endpoint := "/archive"
+	if g.Path != "" {
+		endpoint = "/file"
+	}
+	return c.AppOrigin.String() + "/api/deployments/" + g.DeploymentID.String() + endpoint + "?grant=" + url.QueryEscape(s.UploadGrant(g))
 }
 
 type handler struct {
@@ -27,11 +32,12 @@ type handler struct {
 	now    func() time.Time
 }
 
-// Register installs the upload endpoint on the app mux. Other methods get
+// Register installs the upload endpoints on the app mux. Other methods get
 // the mux's 405.
 func Register(r *server.Routes, d *server.Deps) error {
 	h := &handler{d: d, sites: sites.NewService(d), signer: token.NewSigner(d.Config.SecretKey), now: time.Now}
-	r.App.Handle("PUT /api/deployments/{id}/archive", h)
+	r.App.HandleFunc("PUT /api/deployments/{id}/archive", h.archive)
+	r.App.HandleFunc("PUT /api/deployments/{id}/file", h.file)
 	return nil
 }
 

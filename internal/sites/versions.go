@@ -138,3 +138,19 @@ func (s *Service) OpenBlob(ctx context.Context, siteID, sha256Hex string) (*stor
 	}
 	return obj, nil
 }
+
+// OpenBlobRange opens length bytes of a site's blob from offset; ErrNotFound when missing.
+func (s *Service) OpenBlobRange(ctx context.Context, siteID, sha256Hex string, offset, length int64) (*storage.Object, error) {
+	sum, err := hex.DecodeString(sha256Hex)
+	if err != nil || len(sum) != 32 || !siteid.Valid(siteID) {
+		return nil, ErrNotFound
+	}
+	obj, err := s.store.GetRange(ctx, BlobKey(siteID, sum), offset, length)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sites: open blob range: %w", err)
+	}
+	return obj, nil
+}

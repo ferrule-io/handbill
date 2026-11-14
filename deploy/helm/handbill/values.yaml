@@ -223,7 +223,7 @@ inviteTTL: "336h"
 # Publishing and request size limits (MAX_* variables). Sizes accept plain
 # bytes or KiB/MiB/GiB/TiB suffixes.
 limits:
-  maxFileSize: "64MiB"        # one file
+  maxFileSize: "512MiB"       # one file
   maxSiteSize: "1GiB"         # all files of one version
   maxSiteFiles: 10000         # files in one version
   maxArchiveSize: "512MiB"    # one uploaded .tar.gz/.zip, compressed and uncompressed

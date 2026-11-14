@@ -147,6 +147,46 @@ func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error
 	}, nil
 }
 
+// GetRange opens length bytes of an object from offset with a ranged GET.
+func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) (*storagetype.Object, error) {
+	if err := storagetype.ValidKey(key); err != nil {
+		return nil, err
+	}
+
+	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(s.s3Key(key)),
+		Range:  aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)),
+	})
+	if err != nil {
+		if isS3NotFound(err) {
+			return nil, storagetype.ErrNotFound
+		}
+		return nil, fmt.Errorf("s3store: get object range: %w", err)
+	}
+	// S3 truncates a range running past the end instead of failing.
+	if resp.ContentLength == nil || *resp.ContentLength != length {
+		_ = resp.Body.Close()
+		var got int64 = -1
+		if resp.ContentLength != nil {
+			got = *resp.ContentLength
+		}
+		return nil, fmt.Errorf("s3store: range %d+%d returned %d bytes", offset, length, got)
+	}
+	var contentType string
+	if resp.ContentType != nil {
+		contentType = *resp.ContentType
+	}
+
+	return &storagetype.Object{
+		Info: storagetype.Info{
+			Size:        length,
+			ContentType: contentType,
+		},
+		Body: resp.Body,
+	}, nil
+}
+
 // Stat retrieves object metadata from S3.
 func (s *Store) Stat(ctx context.Context, key string) (storagetype.Info, error) {
 	if err := storagetype.ValidKey(key); err != nil {

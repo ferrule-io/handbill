@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -32,8 +33,11 @@ type fixture struct {
 	site    string
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, opts ...func(*server.Deps)) *fixture {
 	d := sitestest.Deps(t)
+	for _, o := range opts {
+		o(d)
+	}
 	h, err := server.New(d, upload.Register)
 	if err != nil {
 		t.Fatal(err)
@@ -63,11 +67,22 @@ func (f *fixture) url(dep uuid.UUID, site string, user uuid.UUID, expires time.T
 	return upload.URL(f.d.Config, f.signer, token.UploadGrant{DeploymentID: dep, SiteID: site, UserID: user, Expires: expires})
 }
 
-// put sends the archive and returns the status and error code.
+func (f *fixture) fileURL(dep uuid.UUID, site string, user uuid.UUID, path string, expires time.Time) string {
+	return upload.URL(f.d.Config, f.signer, token.UploadGrant{DeploymentID: dep, SiteID: site, UserID: user, Path: path, Expires: expires})
+}
+
+// put sends the body and returns the status and error code.
 func (f *fixture) put(rawURL string, body []byte) (int, string) {
 	f.t.Helper()
+	return f.send(rawURL, bytes.NewReader(body), int64(len(body)))
+}
+
+// send sends body with a declared length (-1: unknown, as when chunked).
+func (f *fixture) send(rawURL string, body io.Reader, length int64) (int, string) {
+	f.t.Helper()
 	u, _ := url.Parse(rawURL)
-	req := httptest.NewRequest("PUT", u.RequestURI(), bytes.NewReader(body))
+	req := httptest.NewRequest("PUT", u.RequestURI(), body)
+	req.ContentLength = length
 	req.Host = u.Host
 	rec := httptest.NewRecorder()
 	f.h.ServeHTTP(rec, req)
@@ -185,5 +200,62 @@ func TestUpload(t *testing.T) {
 	}
 	if s, e := f.put(good, body); s != 403 || e != "forbidden" {
 		t.Fatalf("demoted: %d %s", s, e)
+	}
+}
+
+func TestFileUpload(t *testing.T) {
+	f := newFixture(t)
+	exp := time.Now().Add(upload.GrantTTL)
+
+	dep := f.deployment(f.site)
+	clip := f.fileURL(dep, f.site, f.manager, "media/clip.mp4", exp)
+	if s, e := f.put(clip, []byte("\x00\x01binary")); s != 200 {
+		t.Fatalf("mp4: %d %s", s, e)
+	}
+	if s, e := f.put(f.fileURL(dep, f.site, f.manager, "docs/a.pdf", exp), []byte("%PDF-1.7")); s != 200 {
+		t.Fatalf("pdf: %d %s", s, e)
+	}
+
+	// A grant works only on its own endpoint.
+	if s, e := f.put(strings.Replace(clip, "/file?", "/archive?", 1), tarGz(map[string]string{"a": "a"})); s != 403 || e != "invalid_grant" {
+		t.Fatalf("file grant on /archive: %d %s", s, e)
+	}
+	archive := f.url(dep, f.site, f.manager, exp)
+	if s, e := f.put(strings.Replace(archive, "/archive?", "/file?", 1), []byte("x")); s != 403 || e != "invalid_grant" {
+		t.Fatalf("archive grant on /file: %d %s", s, e)
+	}
+	if s, e := f.put(f.fileURL(dep, f.site, f.manager, "_auth/x", exp), []byte("x")); s != 400 || e != "invalid_file" {
+		t.Fatalf("reserved path: %d %s", s, e)
+	}
+
+	v, err := f.svc.Finalize(t.Context(), dep, f.manager)
+	if err != nil || v.FileCount != 2 {
+		t.Fatalf("finalize: %+v %v", v, err)
+	}
+	if fi, err := f.svc.FindFile(t.Context(), v.ID, "media/clip.mp4"); err != nil || fi.Size != 8 || fi.ContentType != "video/mp4" {
+		t.Fatalf("clip: %+v %v", fi, err)
+	}
+	if s, e := f.put(clip, []byte("again")); s != 409 || e != "deployment_closed" {
+		t.Fatalf("finalized: %d %s", s, e)
+	}
+}
+
+func TestFileUploadLimit(t *testing.T) {
+	f := newFixture(t, func(d *server.Deps) { d.Config.Limits.MaxFileSize = 8 })
+	exp := time.Now().Add(upload.GrantTTL)
+	u := f.fileURL(f.deployment(f.site), f.site, f.manager, "a.bin", exp)
+
+	if s, e := f.put(u, []byte("123456789")); s != 413 || e != "too_large" {
+		t.Fatalf("declared 9 bytes: %d %s", s, e)
+	}
+	// Without a declared length the body is cut at the limit, not truncated.
+	if s, e := f.send(u, strings.NewReader("123456789"), -1); s != 413 || e != "too_large" {
+		t.Fatalf("undeclared 9 bytes: %d %s", s, e)
+	}
+	if s, e := f.send(u, strings.NewReader("12345678"), -1); s != 200 {
+		t.Fatalf("undeclared 8 bytes: %d %s", s, e)
+	}
+	if s, e := f.put(u, []byte("12345678")); s != 200 {
+		t.Fatalf("8 bytes: %d %s", s, e)
 	}
 }

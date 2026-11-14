@@ -35,7 +35,7 @@ type Limits struct {
 // DefaultLimits are the limits when no variable is set.
 func DefaultLimits() Limits {
 	return Limits{
-		MaxFileSize:       64 << 20,
+		MaxFileSize:       512 << 20,
 		MaxSiteSize:       1 << 30,
 		MaxSiteFiles:      10_000,
 		MaxArchiveSize:    512 << 20,

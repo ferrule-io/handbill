@@ -494,7 +494,7 @@ ING_POD=$($KUBECTL -n "$NS_ING" get pod -l app.kubernetes.io/instance=smoke-ing,
 pod_env=$($KUBECTL -n "$NS_ING" get pod "$ING_POD" -o jsonpath='{range .spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}')
 pod_prestop=$($KUBECTL -n "$NS_ING" get pod "$ING_POD" -o jsonpath='{.spec.containers[0].lifecycle.preStop.sleep.seconds}')
 pod_grace=$($KUBECTL -n "$NS_ING" get pod "$ING_POD" -o jsonpath='{.spec.terminationGracePeriodSeconds}')
-if grep -qx 'MAX_FILE_SIZE=64MiB' <<<"$pod_env" && grep -qx 'METRICS_ADDR=:9090' <<<"$pod_env" \
+if grep -qx 'MAX_FILE_SIZE=512MiB' <<<"$pod_env" && grep -qx 'METRICS_ADDR=:9090' <<<"$pod_env" \
   && grep -qx 'TRUSTED_PROXIES=10.244.0.0/16' <<<"$pod_env" && [ "$pod_prestop" = "5" ] && [ "$pod_grace" = "40" ]; then
   pass "${NS_ING}: pod has the limit, metrics, proxy, preStop (5s), and grace period (40s) settings"
 else

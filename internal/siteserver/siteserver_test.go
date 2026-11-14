@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -514,6 +515,54 @@ func TestETagAndHead(t *testing.T) {
 	rec = e.do(req{url: e.siteURL(e.site.ID, "/nope"), cookie: cookie})
 	if rec.Code != 404 || rec.Header().Get("ETag") != "" {
 		t.Fatalf("404: %d etag %q", rec.Code, rec.Header().Get("ETag"))
+	}
+}
+
+func TestRanges(t *testing.T) {
+	e := newEnv(t)
+	s := e.newSite(map[string]string{"index.html": "x", "clip.mp4": "0123456789"})
+	cookie := e.cookieFor(s.ID, e.owner)
+	get := func(method string, headers map[string]string) *httptest.ResponseRecorder {
+		return e.do(req{method: method, url: e.siteURL(s.ID, "/clip.mp4"), cookie: cookie, headers: headers})
+	}
+
+	rec := get("", nil)
+	etag := rec.Header().Get("ETag")
+	if rec.Code != 200 || rec.Header().Get("Accept-Ranges") != "bytes" || rec.Header().Get("Content-Type") != "video/mp4" || rec.Body.String() != "0123456789" {
+		t.Fatalf("no Range: %d %v %q", rec.Code, rec.Header(), rec.Body)
+	}
+
+	for _, tc := range []struct {
+		name, rng, ifRange string
+		code               int
+		body, contentRange string
+	}{
+		{"closed", "bytes=2-4", "", 206, "234", "bytes 2-4/10"},
+		{"suffix", "bytes=-3", "", 206, "789", "bytes 7-9/10"},
+		{"open", "bytes=7-", "", 206, "789", "bytes 7-9/10"},
+		{"clamped", "bytes=8-100", "", 206, "89", "bytes 8-9/10"},
+		{"past end", "bytes=10-", "", 416, "", "bytes */10"},
+		{"multi", "bytes=0-1,3-4", "", 200, "0123456789", ""},
+		{"malformed", "bytes=x-1", "", 200, "0123456789", ""},
+		{"stale If-Range", "bytes=2-4", `"other"`, 200, "0123456789", ""},
+		{"matching If-Range", "bytes=2-4", etag, 206, "234", "bytes 2-4/10"},
+	} {
+		h := map[string]string{"Range": tc.rng}
+		if tc.ifRange != "" {
+			h["If-Range"] = tc.ifRange
+		}
+		rec := get("", h)
+		if rec.Code != tc.code || rec.Body.String() != tc.body || rec.Header().Get("Content-Range") != tc.contentRange {
+			t.Errorf("%s: %d %q Content-Range %q; want %d %q %q", tc.name, rec.Code, rec.Body, rec.Header().Get("Content-Range"), tc.code, tc.body, tc.contentRange)
+		}
+		if want := strconv.Itoa(len(tc.body)); rec.Header().Get("Content-Length") != want {
+			t.Errorf("%s: Content-Length %q, want %s", tc.name, rec.Header().Get("Content-Length"), want)
+		}
+	}
+
+	rec = get(http.MethodHead, map[string]string{"Range": "bytes=2-4"})
+	if rec.Code != 206 || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "3" || rec.Header().Get("Content-Range") != "bytes 2-4/10" {
+		t.Fatalf("HEAD range: %d %v", rec.Code, rec.Header())
 	}
 }
 

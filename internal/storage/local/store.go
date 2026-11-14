@@ -225,6 +225,56 @@ func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error
 	}, nil
 }
 
+// readCloser reads from Reader and closes Closer.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// GetRange opens length bytes of an object from offset.
+func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) (*storagetype.Object, error) {
+	if err := storagetype.ValidKey(key); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	f, err := s.rootFS.Open(objectRelPath(key))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
+			return nil, storagetype.ErrNotFound
+		}
+		return nil, err
+	}
+
+	fi, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if fi.IsDir() {
+		_ = f.Close()
+		return nil, storagetype.ErrNotFound
+	}
+	if offset < 0 || length <= 0 || offset+length > fi.Size() {
+		_ = f.Close()
+		return nil, fmt.Errorf("local: range %d+%d outside object of %d bytes", offset, length, fi.Size())
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+
+	return &storagetype.Object{
+		Info: storagetype.Info{
+			Size:        length,
+			ContentType: s.readContentType(key),
+		},
+		Body: readCloser{io.LimitReader(f, length), f},
+	}, nil
+}
+
 // Stat returns metadata without the body.
 func (s *Store) Stat(ctx context.Context, key string) (storagetype.Info, error) {
 	if err := storagetype.ValidKey(key); err != nil {

@@ -23,6 +23,11 @@ type Store interface {
 	Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
 	// Get opens an object for reading. The caller closes Object.Body.
 	Get(ctx context.Context, key string) (*Object, error)
+	// GetRange opens length bytes of an object starting at offset. The caller
+	// ensures offset >= 0, length > 0, and offset+length <= the object's size;
+	// a range past the end is an error. Info.Size is length. The caller closes
+	// Object.Body.
+	GetRange(ctx context.Context, key string, offset, length int64) (*Object, error)
 	// Stat returns an object's metadata without its body.
 	Stat(ctx context.Context, key string) (Info, error)
 	// Delete removes an object. Deleting a missing key is not an error.

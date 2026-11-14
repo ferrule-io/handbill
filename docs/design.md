@@ -93,10 +93,16 @@ reserved `/_auth/` is site content, including `/healthz` and `/readyz`.
   Anything else → the site's `404.html` with status 404 if it has one, else a
   plain-text 404. A site with nothing published answers a plain 404.
 - Headers: `Content-Type` from the file's recorded type, `Content-Length`,
-  `ETag` = the blob's SHA-256 (`If-None-Match` → 304), `Cache-Control:
-  private, no-cache` (so every load re-checks access), `X-Content-Type-Options:
-  nosniff`, and `Strict-Transport-Security: max-age=31536000` when
-  `APP_ORIGIN` is `https`.
+  `ETag` = the blob's SHA-256 (`If-None-Match` → 304), `Accept-Ranges: bytes`,
+  `Cache-Control: private, no-cache` (so every load re-checks access),
+  `X-Content-Type-Options: nosniff`, and `Strict-Transport-Security:
+  max-age=31536000` when `APP_ORIGIN` is `https`.
+- Ranges (video seeking; Safari plays `<video>` only with them): a single
+  `bytes=` range answers 206 with `Content-Range`, read from storage as that
+  range only; a range starting past the end answers 416 with
+  `Content-Range: bytes */<size>`. Multi-range, malformed, or non-`bytes`
+  headers, and an `If-Range` other than the exact ETag, get the whole file
+  (200). A site's `404.html` is always sent whole.
 - Service workers are refused: a request carrying `Service-Worker: script`
   gets 403 before authorization. A worker registered by site content would
   control `/_auth/` navigations (stealing tickets and public-link tokens) and
@@ -158,6 +164,7 @@ with the app or with each other (URL option B).
 | `/oauth/revoke` | Token revocation (RFC 7009) |
 | `/oauth/register` | Dynamic Client Registration; only when `OAUTH_DCR_ENABLED=true` |
 | `/api/deployments/<id>/archive` | Archive upload target returned by `get_upload_url` |
+| `/api/deployments/<id>/file` | Raw single-file upload target returned by `get_upload_url` with `path` |
 | `/app-api/*` | JSON endpoints for the UI only (session cookie + CSRF) |
 
 ### Site sign-in handoff
@@ -229,8 +236,8 @@ do not stop an artifact from sending credentialed requests to the app. Required:
   `Content-Type: application/json` for request bodies.
 - Non-cookie endpoints are exempt from the Origin/CSRF check and never accept
   the session cookie: `/mcp` (bearer token), `/oauth/token` and `/oauth/revoke`
-  (PKCE/client authentication), and `/api/deployments/<id>/archive` (signed
-  short-lived URL).
+  (PKCE/client authentication), and `/api/deployments/<id>/archive` and
+  `/api/deployments/<id>/file` (signed short-lived URL).
 - Site responses send `X-Content-Type-Options: nosniff`, no CORS headers, and
   `Referrer-Policy: no-referrer` on `/_auth/*`.
 - App pages (the static export) send `X-Frame-Options: DENY` and a CSP built
@@ -432,13 +439,18 @@ the one-shot form of the same pipeline.
   path wins.
 - Finalizing creates the immutable version and its file list and repoints
   the site in one transaction; a deployment finalizes once.
+- Raw files: `get_upload_url` with `path` signs that cleaned path into the
+  grant; the URL (`/api/deployments/<id>/file`) takes the request body as
+  that one file, of any size up to `MAX_FILE_SIZE`, with its content type
+  from the path's extension (never the request's `Content-Type`). An empty
+  body publishes an empty file. A grant works only on its own endpoint.
 - Archives (`.tar.gz`, `.zip`) are streamed entry by entry. Symlinks, hard
   links, devices, FIFOs, and invalid paths reject the whole archive;
   directory entries are skipped. When every file shares one top-level
   directory (`site/index.html`, `site/css/app.css`, as `tar czf site.tar.gz
   site/` produces), that directory is stripped; otherwise paths are kept as
   they are. Limits (configurable, see [Configuration](#configuration)):
-  `MAX_ARCHIVE_ENTRIES` (10 000) entries, `MAX_FILE_SIZE` (64 MiB) per
+  `MAX_ARCHIVE_ENTRIES` (10 000) entries, `MAX_FILE_SIZE` (512 MiB) per
   file, `MAX_ARCHIVE_SIZE` (512 MiB) uncompressed per archive (also the cap
   on compressed bytes read). A zip's entry count is checked before its
   central directory is read, both as declared (zip64 included) and as
@@ -523,7 +535,7 @@ the one-shot form of the same pipeline.
 | `publish_site` | One-shot atomic publish: `files[{path, content, encoding: utf8\|base64}]`, `mode: replace\|merge`, `delete_paths[]`, `notify` (with SMTP and a verified publisher address, emails the other members that the site was updated; `notify_result` reports what was sent, or why not: mail not configured, publisher's address not verified, or the mail server refused) | manager |
 | `create_deployment` | Start a staged publish (`mode: replace\|merge`); returns a deployment id | manager |
 | `upload_files` | Add files to a staged deployment | manager, creator only |
-| `get_upload_url` | Short-lived signed URL, bound to the caller, to upload a `.tar.gz`/`.zip` into a staged deployment | manager, creator only |
+| `get_upload_url` | Short-lived signed URL, bound to the caller, to upload a `.tar.gz`/`.zip`, or with `path` one raw file, into a staged deployment | manager, creator only |
 | `finalize_deployment` | Atomically publish a staged deployment as a new version | manager, creator only |
 | `list_files` | Paths, sizes, content types in the current version | manager |
 | `read_file` | Read one file from the current version | manager |
@@ -590,7 +602,7 @@ sets exactly these.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | empty | Google sign-in; set both or neither (disabled when unset) |
 | `OAUTH_DCR_ENABLED` | `false` | Serve `/oauth/register` (Dynamic Client Registration) |
 | `INVITE_TTL` | `336h` | Lifetime of invites and ownership transfers (Go duration) |
-| `MAX_FILE_SIZE` | `64MiB` | Largest file, direct or in an archive |
+| `MAX_FILE_SIZE` | `512MiB` | Largest file, direct or in an archive |
 | `MAX_SITE_SIZE` | `1GiB` | Total bytes of one version's files |
 | `MAX_SITE_FILES` | `10000` | Files in one version |
 | `MAX_ARCHIVE_SIZE` | `512MiB` | One archive upload, compressed and uncompressed |
@@ -678,6 +690,7 @@ trusted proxies, and entries a client wrote itself are never believed.
 | invite_accept | invite accept | user | 20, 30/min |
 | mcp | `/mcp` | bearer token; address | 120, 300/min; 300, 1200/min |
 | archive_upload | `PUT /api/deployments/{id}/archive` | address | 10, 30/min |
+| file_upload | `PUT /api/deployments/{id}/file` | address | 60, 120/min |
 | sites | every site-host request | address | 400, 1200/min |
 
 A refused request gets 429 with `Retry-After` (seconds): JSON in the

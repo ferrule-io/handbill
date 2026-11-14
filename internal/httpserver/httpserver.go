@@ -35,7 +35,8 @@ const (
 
 // Per-route deadlines, set from the start of the request.
 const (
-	// UploadTimeout covers a MAX_ARCHIVE_SIZE archive on a slow uplink.
+	// UploadTimeout covers a MAX_ARCHIVE_SIZE archive or MAX_FILE_SIZE file
+	// on a slow uplink.
 	UploadTimeout = 30 * time.Minute
 	// MCPTimeout covers a MAX_MCP_BODY publish_site call.
 	MCPTimeout = 5 * time.Minute
@@ -86,7 +87,7 @@ func Serve(ctx context.Context, srv *http.Server, ln net.Listener, drain time.Du
 func Register(r *server.Routes, d *server.Deps) error {
 	r.UseApp(extend(d.Logger, func(req *http.Request) (read, write time.Duration) {
 		switch _, pattern := r.App.Handler(req); pattern {
-		case "PUT /api/deployments/{id}/archive":
+		case "PUT /api/deployments/{id}/archive", "PUT /api/deployments/{id}/file":
 			return UploadTimeout, UploadTimeout
 		case "POST /mcp":
 			return MCPTimeout, MCPTimeout

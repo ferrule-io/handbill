@@ -84,10 +84,18 @@ var webTypes = map[string]string{
 	".wasm":        "application/wasm",
 	".pdf":         "application/pdf",
 	".mp4":         "video/mp4",
+	".m4v":         "video/mp4",
+	".mov":         "video/quicktime",
 	".webm":        "video/webm",
+	".ogv":         "video/ogg",
 	".mp3":         "audio/mpeg",
+	".m4a":         "audio/mp4",
+	".flac":        "audio/flac",
 	".wav":         "audio/wav",
 	".ogg":         "audio/ogg",
+	".heic":        "image/heic",
+	".heif":        "image/heif",
+	".vtt":         "text/vtt",
 	".zip":         "application/zip",
 }
 

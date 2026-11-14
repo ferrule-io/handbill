@@ -238,6 +238,45 @@ func Run(t *testing.T, newStore func(t *testing.T) storage.Store) {
 		}
 	})
 
+	t.Run("GetRange", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+		key := "test/range.bin"
+		content := "0123456789"
+		if err := s.Put(ctx, key, strings.NewReader(content), int64(len(content)), "application/octet-stream"); err != nil {
+			t.Fatalf("Put failed: %v", err)
+		}
+
+		for _, tc := range []struct {
+			offset, length int64
+			want           string
+		}{{2, 3, "234"}, {0, 10, content}, {9, 1, "9"}} {
+			obj, err := s.GetRange(ctx, key, tc.offset, tc.length)
+			if err != nil {
+				t.Fatalf("GetRange(%d, %d) failed: %v", tc.offset, tc.length, err)
+			}
+			data, err := io.ReadAll(obj.Body)
+			_ = obj.Body.Close()
+			if err != nil {
+				t.Fatalf("GetRange(%d, %d) read failed: %v", tc.offset, tc.length, err)
+			}
+			if string(data) != tc.want {
+				t.Errorf("GetRange(%d, %d) = %q, want %q", tc.offset, tc.length, data, tc.want)
+			}
+			if obj.Size != tc.length {
+				t.Errorf("GetRange(%d, %d) Size = %d, want %d", tc.offset, tc.length, obj.Size, tc.length)
+			}
+		}
+
+		if obj, err := s.GetRange(ctx, key, 8, 5); err == nil {
+			_ = obj.Body.Close()
+			t.Error("GetRange past the end succeeded")
+		}
+		if _, err := s.GetRange(ctx, "does/not/exist.bin", 0, 1); !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("GetRange missing key err = %v, want ErrNotFound", err)
+		}
+	})
+
 	t.Run("DeleteMissingIsNil", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

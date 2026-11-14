@@ -128,6 +128,11 @@ func deletePathsPatch(s *jsonschema.Schema) {
 	d.Items.MinLength, d.Items.MaxLength = new(1), new(sites.MaxPathLen)
 }
 
+func uploadPathPatch(s *jsonschema.Schema) {
+	p := prop(s, "path")
+	p.MinLength, p.MaxLength = new(1), new(sites.MaxPathLen)
+}
+
 func patches(ps ...func(*jsonschema.Schema)) func(*jsonschema.Schema) {
 	return func(s *jsonschema.Schema) {
 		for _, p := range ps {

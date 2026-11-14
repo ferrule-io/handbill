@@ -132,6 +132,34 @@ func (s *Store) Get(ctx context.Context, key string) (*storagetype.Object, error
 	}, nil
 }
 
+// GetRange opens length bytes of an object from offset with a range reader.
+func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) (*storagetype.Object, error) {
+	if err := storagetype.ValidKey(key); err != nil {
+		return nil, err
+	}
+
+	r, err := s.bucket.Object(s.gcsKey(key)).NewRangeReader(ctx, offset, length)
+	if err != nil {
+		if isGCSNotFound(err) {
+			return nil, storagetype.ErrNotFound
+		}
+		return nil, fmt.Errorf("gcsstore: range reader: %w", err)
+	}
+	// GCS truncates a range running past the end instead of failing.
+	if r.Remain() != length {
+		_ = r.Close()
+		return nil, fmt.Errorf("gcsstore: range %d+%d returned %d bytes", offset, length, r.Remain())
+	}
+
+	return &storagetype.Object{
+		Info: storagetype.Info{
+			Size:        length,
+			ContentType: r.Attrs.ContentType,
+		},
+		Body: r,
+	}, nil
+}
+
 // Stat retrieves object metadata from GCS.
 func (s *Store) Stat(ctx context.Context, key string) (storagetype.Info, error) {
 	if err := storagetype.ValidKey(key); err != nil {

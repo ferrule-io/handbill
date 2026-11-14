@@ -61,6 +61,9 @@ type staged struct {
 // that will go out under someone else's name.
 var ErrNotCreator = errors.New("sites: deployment was created by another account")
 
+// ErrFileTooLarge is returned when an uploaded file exceeds MAX_FILE_SIZE.
+var ErrFileTooLarge = errors.New("sites: file too large")
+
 // CreateDeployment opens a staged publish on a site; ErrNotFound when the
 // site does not exist. Only by can add to, upload into, or finalize it.
 func (s *Service) CreateDeployment(ctx context.Context, siteID string, by uuid.UUID, mode Mode) (uuid.UUID, error) {
@@ -153,6 +156,32 @@ func (s *Service) AddFiles(ctx context.Context, deployment, by uuid.UUID, files 
 		out = append(out, st)
 	}
 	return s.addStaged(ctx, deployment, out)
+}
+
+// AddFile stores one file's bytes, read from r to EOF, at path in an open
+// deployment created by by, replacing earlier additions or deletions of
+// that path. The content type comes from the path's extension.
+func (s *Service) AddFile(ctx context.Context, deployment, by uuid.UUID, path string, r io.Reader) error {
+	d, err := s.openDeployment(ctx, deployment, by)
+	if err != nil {
+		return err
+	}
+	p, err := CleanPath(path)
+	if err != nil {
+		return err
+	}
+	sp, err := spool(r, s.limits.MaxFileSize)
+	if errors.Is(err, errTooLarge) {
+		return fmt.Errorf("%w: file %q is larger than %d bytes", ErrFileTooLarge, p, s.limits.MaxFileSize)
+	}
+	if err != nil {
+		return fmt.Errorf("sites: read file %q: %w", p, err)
+	}
+	defer sp.close()
+	if err := s.putBlob(ctx, d.SiteID, sp.sum, sp.size, sp.reader); err != nil {
+		return err
+	}
+	return s.addStaged(ctx, deployment, []staged{{path: p, contentType: ContentTypeFor(p), sum: sp.sum, size: sp.size}})
 }
 
 // putBlob uploads a blob unless the site already has it (site_blobs is the

@@ -96,6 +96,9 @@ var Rules = []Rule{
 	{Name: "archive_upload", Patterns: []string{
 		"PUT /api/deployments/{id}/archive",
 	}, Key: ByIP, Limit: Limit{PerMinute: 30, Burst: 10}},
+	{Name: "file_upload", Patterns: []string{
+		"PUT /api/deployments/{id}/file",
+	}, Key: ByIP, Limit: Limit{PerMinute: 120, Burst: 60}},
 
 	// Site hosts: a page load fetches many assets at once.
 	{Name: "sites", Sites: true, Key: ByIP, Limit: Limit{PerMinute: 1200, Burst: 400}},

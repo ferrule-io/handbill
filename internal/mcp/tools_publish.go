@@ -30,7 +30,10 @@ Publishing is atomic: viewers see the old version or the new one, never a mix. E
 
 Set notify to email the site's other members that it was updated (useful for a recurring dashboard); it only works when the server has SMTP configured and your email address is verified, and the result's notify_result says what happened.`
 
-const uploadURLDescription = "Get a short-lived URL for uploading a whole site as one archive into an open staged deployment - the best option for big sites, many files, or binary assets when you can run shell commands. Build the archive from the site's root directory, for example `tar -czf site.tar.gz -C dist .` or `(cd dist && zip -r ../site.zip .)`, then upload the raw file with an HTTP PUT: `curl --fail-with-body -T site.tar.gz '<upload_url>'`. Send no Authorization header: the URL itself is the credential, so do not share or log it. It expires after 15 minutes; get a new one if needed. .tar.gz and .zip are accepted (detected from the content). If every file is inside one top-level folder (as `tar -czf site.tar.gz dist/` produces), that folder is removed from the paths. Symlinks and special files are rejected. Limits: 512 MB uncompressed, 64 MB per file, 10,000 entries. You can upload more than once; later uploads overwrite earlier paths. Then call finalize_deployment."
+const uploadURLDescription = "Get a short-lived URL for uploading into an open staged deployment with an HTTP PUT. This is the best option for photos, videos, PDFs, other binary assets, and big sites when you can run shell commands. Two kinds of URL:\n" +
+	"- With path (for example media/trip.mp4): the URL takes one raw file, stored at that path with its content type taken from the extension. Upload it with `curl --fail-with-body -T trip.mp4 '<upload_url>'`, then link it from your pages by relative path (for example `<video src=\"media/trip.mp4\" controls>` or `<a href=\"media/report.pdf\">`). Videos stream with seeking.\n" +
+	"- Without path: the URL takes a whole site as one .tar.gz or .zip, detected from the content. Build it from the site's root directory, for example `tar -czf site.tar.gz -C dist .` or `(cd dist && zip -r ../site.zip .)`, and upload it the same way. If every file is inside one top-level folder, that folder is removed from the paths; symlinks and special files are rejected.\n\n" +
+	"Send no Authorization header: the URL itself is the credential, so do not share or log it. It expires after 15 minutes; get a new one if needed. max_bytes in the result is the size limit for that upload. You can upload any number of times, and a later upload to the same path overwrites the earlier one. Then call finalize_deployment."
 
 type publishIn struct {
 	Site        string      `json:"site" jsonschema:"The site id."`
@@ -84,12 +87,19 @@ type deploymentIn struct {
 	DeploymentID string `json:"deployment_id" jsonschema:"The deployment id from create_deployment."`
 }
 
+type uploadURLIn struct {
+	Site         string `json:"site" jsonschema:"The site id."`
+	DeploymentID string `json:"deployment_id" jsonschema:"The deployment id from create_deployment."`
+	Path         string `json:"path,omitempty" jsonschema:"Optional. A site path such as media/trip.mp4: the URL then uploads that one raw file (photo, video, PDF, any binary). Omit it to upload a .tar.gz or .zip of many files."`
+}
+
 type uploadURLOut struct {
 	UploadURL string   `json:"upload_url"`
 	Method    string   `json:"method"`
 	ExpiresAt string   `json:"expires_at"`
 	MaxBytes  int64    `json:"max_bytes"`
-	Formats   []string `json:"formats"`
+	Path      string   `json:"path,omitempty"`
+	Formats   []string `json:"formats,omitempty"`
 	Example   string   `json:"example"`
 }
 
@@ -174,7 +184,7 @@ func addPublishTools(s *mcpsdk.Server, env *Env) {
 
 	addTool(s, env, &mcpsdk.Tool{
 		Name:        "create_deployment",
-		Description: "Start a staged publish for large sites or files produced over several steps; returns a deployment_id. Add files with upload_files (inline, up to 16 MB per call, repeatable) and/or upload a whole .tar.gz or .zip through get_upload_url, then call finalize_deployment to publish everything atomically as one new version. The site does not change until finalize. mode 'replace' publishes exactly the deployment's files; 'merge' applies them on top of the version that is current when you finalize, and removes any delete_paths. The deployment is yours: other accounts cannot add to or finalize it. A deployment you never finalize has no effect.",
+		Description: "Start a staged publish for large sites or files produced over several steps; returns a deployment_id. Add files with upload_files (inline, up to 16 MB per call, repeatable) and/or upload raw files or a whole .tar.gz or .zip through get_upload_url, then call finalize_deployment to publish everything atomically as one new version. The site does not change until finalize. mode 'replace' publishes exactly the deployment's files; 'merge' applies them on top of the version that is current when you finalize, and removes any delete_paths. The deployment is yours: other accounts cannot add to or finalize it. A deployment you never finalize has no effect.",
 		Annotations: mutating("Create deployment", false, false),
 	}, patches(sitePatch, modePatch), func(ctx context.Context, in createDeploymentIn) (createDeploymentOut, error) {
 		a, err := env.site(ctx, "create_deployment", in.Site, rbac.Publish)
@@ -228,7 +238,7 @@ func addPublishTools(s *mcpsdk.Server, env *Env) {
 		Name:        "get_upload_url",
 		Description: uploadURLDescription,
 		Annotations: mutating("Get upload URL", false, false), // not read-only: the URL is a bearer credential
-	}, patches(sitePatch, uuidPatch("deployment_id")), func(ctx context.Context, in deploymentIn) (uploadURLOut, error) {
+	}, patches(sitePatch, uuidPatch("deployment_id"), uploadPathPatch), func(ctx context.Context, in uploadURLIn) (uploadURLOut, error) {
 		a, err := env.site(ctx, "get_upload_url", in.Site, rbac.Publish)
 		if err != nil {
 			return uploadURLOut{}, err
@@ -241,6 +251,21 @@ func addPublishTools(s *mcpsdk.Server, env *Env) {
 			return uploadURLOut{}, deploymentClosed(in.DeploymentID)
 		}
 		g := token.UploadGrant{DeploymentID: dep.ID, SiteID: dep.SiteID, UserID: a.p.UserID, Expires: time.Now().Add(upload.GrantTTL)}
+		if in.Path != "" {
+			p, err := sites.CleanPath(in.Path)
+			if err != nil {
+				return uploadURLOut{}, err
+			}
+			g.Path = p
+			return uploadURLOut{
+				UploadURL: upload.URL(env.Deps.Config, env.Signer, g),
+				Method:    "PUT",
+				ExpiresAt: ts(g.Expires),
+				MaxBytes:  env.Sites.Limits().MaxFileSize,
+				Path:      p,
+				Example:   "curl --fail-with-body -T trip.mp4 '<upload_url>'",
+			}, nil
+		}
 		return uploadURLOut{
 			UploadURL: upload.URL(env.Deps.Config, env.Signer, g),
 			Method:    "PUT",

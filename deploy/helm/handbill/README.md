@@ -468,7 +468,7 @@ Dry runs can be triggered manually via `workflow_dispatch` in GitHub Actions by 
 | `podSecurityContext` | Pod security context (UID/GID 65532) | See `values.yaml` |
 | `securityContext` | Container security context (drop ALL, readOnlyRoot) | See `values.yaml` |
 | `resources` | Resource requests and limits | `{}` |
-| `limits.*` | Publishing and request size caps (`MAX_*`); see `values.yaml` | 64MiB file, 1GiB / 10000 files per version, 512MiB / 10000-entry archives, 16MiB `/mcp`, 1MiB JSON |
+| `limits.*` | Publishing and request size caps (`MAX_*`); see `values.yaml` | 512MiB file, 1GiB / 10000 files per version, 512MiB / 10000-entry archives, 16MiB `/mcp`, 1MiB JSON |
 | `rateLimit.enabled` | Per-replica in-memory rate limits | `true` |
 | `rateLimit.trustedProxies` | CIDRs allowed to set `X-Forwarded-For` | `[]` |
 | `metrics.enabled` | Serve `/metrics` on a separate port and Service | `false` |

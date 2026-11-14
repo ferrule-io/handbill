@@ -313,6 +313,16 @@ func TestStagedDeployment(t *testing.T) {
 		t.Fatalf("grant: %+v %v %s", g, err, parsed.Path)
 	}
 
+	file := ok[uploadURLOut](t, r.manager, "get_upload_url", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID, "path": "media/a.png"})
+	parsed, err = url.Parse(file.UploadURL)
+	if err != nil || file.MaxBytes != config.DefaultLimits().MaxFileSize || file.Path != "media/a.png" || parsed.Path != "/api/deployments/"+dep.DeploymentID+"/file" {
+		t.Fatalf("get_upload_url with path: %+v", file)
+	}
+	if g, err := e.env.Signer.ParseUploadGrant(parsed.Query().Get("grant"), time.Now()); err != nil || g.Path != "media/a.png" {
+		t.Fatalf("file grant: %+v %v", g, err)
+	}
+	fails(t, r.manager, "get_upload_url", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID, "path": "../x"}, "invalid path")
+
 	fin := ok[publishOut](t, r.manager, "finalize_deployment", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID})
 	if fin.Version.FileCount != 2 {
 		t.Fatalf("finalize: %+v", fin)

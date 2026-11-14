@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -38,6 +39,7 @@ import (
 	"github.com/ferrule-io/handbill/internal/server"
 	"github.com/ferrule-io/handbill/internal/siteid"
 	"github.com/ferrule-io/handbill/internal/sites"
+	"github.com/ferrule-io/handbill/internal/storage"
 	"github.com/ferrule-io/handbill/internal/token"
 )
 
@@ -228,22 +230,48 @@ func canonicalPath(urlPath, filePath string) (string, bool) {
 	return "", false
 }
 
+// serveFile streams fi with status. A 200 honors If-None-Match and a single
+// byte range (206, or 416 when unsatisfiable); 404.html is always whole.
 func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, siteID string, fi sites.FileInfo, status int) {
 	hdr := w.Header()
 	hdr.Set("Cache-Control", "private, no-cache")
 	etag := `"` + fi.SHA256 + `"`
+	var start, length int64 = 0, fi.Size
+	ranged := false
 	if status == http.StatusOK {
 		hdr.Set("ETag", etag)
+		hdr.Set("Accept-Ranges", "bytes")
 		if etagMatch(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
+		if rh := r.Header.Get("Range"); rh != "" {
+			if ir := r.Header.Get("If-Range"); ir == "" || ir == etag {
+				s, n, ok, unsatisfiable := parseRange(rh, fi.Size)
+				if unsatisfiable {
+					hdr.Set("Content-Range", "bytes */"+strconv.FormatInt(fi.Size, 10))
+					hdr.Set("Content-Length", "0")
+					w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+					return
+				}
+				if ok {
+					start, length, ranged = s, n, true
+				}
+			}
+		}
 	}
 	var body io.ReadCloser
 	if r.Method != http.MethodHead {
-		obj, err := h.sites.OpenBlob(r.Context(), siteID, fi.SHA256)
+		var obj *storage.Object
+		var err error
+		if ranged {
+			obj, err = h.sites.OpenBlobRange(r.Context(), siteID, fi.SHA256, start, length)
+		} else {
+			obj, err = h.sites.OpenBlob(r.Context(), siteID, fi.SHA256)
+		}
 		if err != nil {
 			hdr.Del("ETag")
+			hdr.Del("Accept-Ranges")
 			h.fail(w, r, err)
 			return
 		}
@@ -251,11 +279,71 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, siteID strin
 		body = obj.Body
 	}
 	hdr.Set("Content-Type", fi.ContentType)
-	hdr.Set("Content-Length", strconv.FormatInt(fi.Size, 10))
+	hdr.Set("Content-Length", strconv.FormatInt(length, 10))
+	if ranged {
+		hdr.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, fi.Size))
+		status = http.StatusPartialContent
+	}
 	w.WriteHeader(status)
 	if body != nil {
 		_, _ = io.Copy(w, body)
 	}
+}
+
+// parseRange parses a single "bytes=" range against size. ok=false means
+// serve the whole file (absent, malformed, multi-range, or non-bytes
+// header); unsatisfiable=true means answer 416.
+func parseRange(header string, size int64) (start, length int64, ok, unsatisfiable bool) {
+	spec, found := strings.CutPrefix(header, "bytes=")
+	if !found {
+		return 0, 0, false, false
+	}
+	spec = strings.TrimSpace(spec)
+	if strings.Contains(spec, ",") {
+		return 0, 0, false, false
+	}
+	a, b, found := strings.Cut(spec, "-")
+	if !found {
+		return 0, 0, false, false
+	}
+	num := func(s string) (int64, bool) {
+		for i := range len(s) {
+			if s[i] < '0' || s[i] > '9' {
+				return 0, false
+			}
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
+		return n, err == nil
+	}
+	if a == "" {
+		n, valid := num(b)
+		if b == "" || !valid {
+			return 0, 0, false, false
+		}
+		if n == 0 || size == 0 {
+			return 0, 0, false, true
+		}
+		n = min(n, size)
+		return size - n, n, true, false
+	}
+	start, valid := num(a)
+	if !valid {
+		return 0, 0, false, false
+	}
+	end := size - 1
+	if b != "" {
+		if end, valid = num(b); !valid {
+			return 0, 0, false, false
+		}
+	}
+	if start >= size {
+		return 0, 0, false, true
+	}
+	if end < start {
+		return 0, 0, false, false
+	}
+	end = min(end, size-1)
+	return start, end - start + 1, true, false
 }
 
 // etagMatch implements If-None-Match's weak comparison.
