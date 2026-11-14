@@ -83,10 +83,13 @@ cookie, else redirect to the handoff), resolve the path against the site's
 current version, and stream the blob from storage. Every path except the
 reserved `/_auth/` is site content, including `/healthz` and `/readyz`.
 
-- Resolution: `/` and paths ending in `/` → `<dir>/index.html`; `/foo` →
-  `foo`, else (when `foo/index.html` exists) a 301 to `/foo/` keeping the
-  query string, so relative links resolve like on other static hosts, else
-  `foo.html`. Paths are case-sensitive.
+- Resolution: `/` and paths ending in `/` → `<dir>/index.html`, else (for a
+  stray slash after a file name, `/foo.html/`) a 301 to `/foo.html`; `/foo` →
+  `foo`, else `foo/index.html`, else `foo.html`. A directory index is
+  canonical at its slash form: reaching `foo/index.html` any other way
+  (`/foo`, `/foo/index.html`) is a 301 to `/foo/` keeping the query string,
+  so relative links resolve like on other static hosts. Paths are
+  case-sensitive.
   Anything else → the site's `404.html` with status 404 if it has one, else a
   plain-text 404. A site with nothing published answers a plain 404.
 - Headers: `Content-Type` from the file's recorded type, `Content-Length`,

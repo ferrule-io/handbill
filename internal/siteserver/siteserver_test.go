@@ -424,7 +424,6 @@ func TestPathResolution(t *testing.T) {
 		ct     string
 	}{
 		"/":           {200, "<h1>home</h1>", "text/html; charset=utf-8"},
-		"/index.html": {200, "<h1>home</h1>", "text/html; charset=utf-8"},
 		"/about":      {200, "<h1>about</h1>", "text/html; charset=utf-8"},
 		"/about.html": {200, "<h1>about</h1>", "text/html; charset=utf-8"},
 		"/docs/":      {200, "<h1>docs</h1>", "text/html; charset=utf-8"},
@@ -445,8 +444,17 @@ func TestPathResolution(t *testing.T) {
 		}
 	}
 
-	// A directory index without its slash redirects, keeping the query.
-	for path, want := range map[string]string{"/docs": "/docs/", "/docs?x=1&y=2": "/docs/?x=1&y=2"} {
+	// Directory indexes redirect to their slash form and a stray slash after
+	// a file name is dropped (issue #2), keeping the query.
+	for path, want := range map[string]string{
+		"/docs":             "/docs/",
+		"/docs?x=1&y=2":     "/docs/?x=1&y=2",
+		"/docs/index.html":  "/docs/",
+		"/docs/index.html/": "/docs/",
+		"/index.html?x=1":   "/?x=1",
+		"/about.html/":      "/about.html",
+		"/docs/guide/?x=1":  "/docs/guide?x=1",
+	} {
 		rec := e.do(req{url: e.siteURL(e.site.ID, path), cookie: cookie})
 		if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != want {
 			t.Errorf("%s: %d %q, want 301 %q", path, rec.Code, rec.Header().Get("Location"), want)
