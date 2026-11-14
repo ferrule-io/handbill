@@ -312,17 +312,52 @@ and can be disconnected, under **Settings → Security**.
 [release notes](https://github.com/ferrule-io/handbill/releases), bump it,
 and restart. Migrations run automatically at startup.
 
-**Backups**: Handbill's state is the PostgreSQL database plus the blob store.
-Site files are immutable and content-addressed, so:
+**Backups**: Handbill's state is the PostgreSQL database plus the blob store,
+and the two must match: every file the database refers to has to be in the
+storage copy. Back up the database first, then the storage. Blobs written
+after the dump are harmless extras that garbage collection removes later.
 
-1. Back up **the database first**, then the storage (volume snapshot, bucket
-   versioning, or replication).
-2. When restoring, restore both before Handbill runs maintenance against the
-   restored database. Otherwise blob garbage collection can delete files the
-   storage copy still needs.
+Database-first ordering alone is **not** enough while Handbill is running.
+Deleting a site removes its files from storage immediately, and blob garbage
+collection deletes unreferenced files. Either can happen between the dump and
+the storage copy, leaving a backup that refers to files it doesn't contain.
+Use one of these:
 
-The [chart README](../deploy/helm/handbill/README.md#backup-and-restore) has
-the step-by-step commands.
+- **Stop Handbill for the backup**: stop the app (scale it to 0, or
+  `docker compose stop handbill`), dump the database, copy the storage, then
+  start it again. Viewers get errors for the few minutes it is down.
+- **Keep object versions**: with S3 or GCS bucket versioning (or storage
+  snapshots kept at least as long as your backups), you can back up while
+  Handbill runs. On restore, bring back any object deleted after the dump
+  time from its previous version.
+
+Restore with Handbill stopped: restore the database, restore the storage, then
+start Handbill. If Handbill starts in between, its maintenance runs blob
+garbage collection against the restored database and can delete files that
+newer copies still need.
+
+With the Compose setup (run in `deploy/compose`; the volume name comes from
+the project name `handbill-selfhosted`):
+
+```bash
+# Backup
+docker compose stop handbill
+docker compose exec -T db pg_dump -U handbill -Fc handbill > handbill.dump
+docker run --rm -v handbill-selfhosted_sites:/data -v "$PWD":/backup alpine \
+  tar -czf /backup/sites.tar.gz -C /data .
+docker compose start handbill
+
+# Restore
+docker compose stop handbill
+docker compose exec -T db pg_restore -U handbill -d handbill --clean --if-exists --no-owner < handbill.dump
+docker run --rm -v handbill-selfhosted_sites:/data -v "$PWD":/backup alpine \
+  sh -c 'find /data -mindepth 1 -delete && tar -xzpf /backup/sites.tar.gz -C /data'
+docker compose start handbill
+```
+
+For Kubernetes, the [chart README](../deploy/helm/handbill/README.md#backup-and-restore)
+has the commands for the bundled database, external databases, and each
+storage type.
 
 **Monitoring**: set `METRICS_ADDR=:9090` (Helm: `metrics.enabled`) to expose
 Prometheus metrics on a separate listener: HTTP request counts and latency by
