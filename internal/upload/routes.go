@@ -15,9 +15,6 @@ import (
 // GrantTTL is how long an upload URL works.
 const GrantTTL = 15 * time.Minute
 
-// maxArchiveBytes caps the request body; a variable so tests can lower it.
-var maxArchiveBytes = sites.MaxArchiveSize
-
 // URL returns the upload URL for a deployment.
 func URL(c *config.Config, s *token.Signer, g token.UploadGrant) string {
 	return c.AppOrigin.String() + "/api/deployments/" + g.DeploymentID.String() + "/archive?grant=" + url.QueryEscape(s.UploadGrant(g))

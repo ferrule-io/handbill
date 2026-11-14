@@ -216,6 +216,50 @@
     },
     "inviteTTL": {
       "type": "string"
-    }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "maxFileSize": { "type": ["string", "integer"] },
+        "maxSiteSize": { "type": ["string", "integer"] },
+        "maxSiteFiles": { "type": "integer", "minimum": 1 },
+        "maxArchiveSize": { "type": ["string", "integer"] },
+        "maxArchiveEntries": { "type": "integer", "minimum": 1 },
+        "maxMCPBody": { "type": ["string", "integer"] },
+        "maxJSONBody": { "type": ["string", "integer"] }
+      }
+    },
+    "rateLimit": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "trustedProxies": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "not": { "const": 8080 } },
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" },
+            "labels": { "type": "object" }
+          }
+        }
+      }
+    },
+    "maintenance": {
+      "type": "object",
+      "properties": {
+        "interval": { "type": "string" },
+        "blobGCGrace": { "type": "string" }
+      }
+    },
+    "shutdownTimeout": { "type": "string" },
+    "preStopSleepSeconds": { "type": "integer", "minimum": 0 },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 }
   }
 }

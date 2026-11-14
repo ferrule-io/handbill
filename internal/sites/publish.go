@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ferrule-io/handbill/internal/db"
+	"github.com/ferrule-io/handbill/internal/metrics"
 )
 
 // Mode is how a deployment's files combine with the site's current version.
@@ -142,8 +143,8 @@ func (s *Service) AddFiles(ctx context.Context, deployment, by uuid.UUID, files 
 		if err != nil {
 			return err
 		}
-		if int64(len(f.Body)) > MaxFileSize {
-			return inputErrorf("file %q is larger than %d bytes", p, MaxFileSize)
+		if int64(len(f.Body)) > s.limits.MaxFileSize {
+			return inputErrorf("file %q is larger than %d bytes", p, s.limits.MaxFileSize)
 		}
 		st := staged{path: p, contentType: ct, sum: sha256.Sum256(f.Body), size: int64(len(f.Body))}
 		if err := s.putBlob(ctx, d.SiteID, st.sum, st.size, func() (io.Reader, error) { return bytes.NewReader(f.Body), nil }); err != nil {
@@ -155,15 +156,16 @@ func (s *Service) AddFiles(ctx context.Context, deployment, by uuid.UUID, files 
 }
 
 // putBlob uploads a blob unless the site already has it (site_blobs is the
-// record; the store cannot list). ErrNotFound when the site is deleted
-// meanwhile.
+// record; the store cannot list). Reusing a blob refreshes its staged_at,
+// which keeps blob GC away from it (internal/maintenance). ErrNotFound
+// when the site is deleted meanwhile.
 func (s *Service) putBlob(ctx context.Context, siteID string, sum [sha256.Size]byte, size int64, open func() (io.Reader, error)) error {
 	q := db.New(s.db)
-	exists, err := q.SiteBlobExists(ctx, db.SiteBlobExistsParams{SiteID: siteID, Sha256: sum[:]})
+	n, err := q.TouchSiteBlob(ctx, db.TouchSiteBlobParams{SiteID: siteID, Sha256: sum[:]})
 	if err != nil {
 		return fmt.Errorf("sites: check blob: %w", err)
 	}
-	if exists {
+	if n > 0 {
 		return nil
 	}
 	r, err := open()
@@ -172,7 +174,7 @@ func (s *Service) putBlob(ctx context.Context, siteID string, sum [sha256.Size]b
 	}
 	// Blobs are shared by paths with different types; the file server sets
 	// Content-Type from version_files, never from the object.
-	if err := s.store.Put(ctx, blobKey(siteID, sum[:]), r, size, "application/octet-stream"); err != nil {
+	if err := s.store.Put(ctx, BlobKey(siteID, sum[:]), r, size, "application/octet-stream"); err != nil {
 		return fmt.Errorf("sites: store blob: %w", err)
 	}
 	err = q.CreateSiteBlob(ctx, db.CreateSiteBlobParams{SiteID: siteID, Sha256: sum[:], Size: size})
@@ -182,7 +184,7 @@ func (s *Service) putBlob(ctx context.Context, siteID string, sum [sha256.Size]b
 		// that clear is gone with it, and one written after it (this case)
 		// can only follow the committed delete, so this insert sees no site
 		// and the object is removed here. Either way none is left behind.
-		if err := s.store.Delete(context.WithoutCancel(ctx), blobKey(siteID, sum[:])); err != nil {
+		if err := s.store.Delete(context.WithoutCancel(ctx), BlobKey(siteID, sum[:])); err != nil {
 			s.logger.Error("sites: remove blob of a deleted site", "site", siteID, "err", err)
 		}
 		return ErrNotFound
@@ -220,8 +222,26 @@ func (s *Service) addStaged(ctx context.Context, deployment uuid.UUID, files []s
 		if err := q.AddDeploymentFiles(ctx, p); err != nil {
 			return fmt.Errorf("sites: add files: %w", err)
 		}
-		return nil
+		// Bound what an open deployment can stage, not only what it can
+		// publish: Finalize checks the resulting version.
+		t, err := q.DeploymentTotals(ctx, deployment)
+		if err != nil {
+			return fmt.Errorf("sites: add files: %w", err)
+		}
+		return s.checkTotals("deployment", int(t.Files), t.Bytes)
 	})
+}
+
+// checkTotals enforces MAX_SITE_FILES and MAX_SITE_SIZE on a deployment or
+// version.
+func (s *Service) checkTotals(what string, files int, size int64) error {
+	if files > s.limits.MaxSiteFiles {
+		return inputErrorf("the %s would have %d files; a site has at most %d", what, files, s.limits.MaxSiteFiles)
+	}
+	if size > s.limits.MaxSiteSize {
+		return inputErrorf("the %s would have %d bytes of files; a site has at most %d", what, size, s.limits.MaxSiteSize)
+	}
+	return nil
 }
 
 func lockOpen(ctx context.Context, q *db.Queries, deployment uuid.UUID) error {
@@ -324,6 +344,13 @@ func (s *Service) Finalize(ctx context.Context, deployment, by uuid.UUID) (Versi
 		if files == 0 {
 			return inputErrorf("the new version would have no files")
 		}
+		t, err := q.VersionTotals(ctx, v.ID)
+		if err != nil {
+			return err
+		}
+		if err := s.checkTotals("new version", int(t.Files), t.Bytes); err != nil {
+			return err
+		}
 		vid := uuid.NullUUID{UUID: v.ID, Valid: true}
 		if _, err := q.FinalizeDeployment(ctx, db.FinalizeDeploymentParams{ID: deployment, VersionID: vid}); err != nil {
 			return err
@@ -339,7 +366,13 @@ func (s *Service) Finalize(ctx context.Context, deployment, by uuid.UUID) (Versi
 		return nil
 	})
 	var ie *InputError
-	if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNotCreator) && !errors.Is(err, ErrDeploymentClosed) && !errors.As(err, &ie) {
+	switch {
+	case err == nil:
+		metrics.Publishes.WithLabelValues("ok").Inc()
+	case errors.Is(err, ErrNotFound) || errors.Is(err, ErrNotCreator) || errors.Is(err, ErrDeploymentClosed) || errors.As(err, &ie):
+		metrics.Publishes.WithLabelValues("rejected").Inc()
+	default:
+		metrics.Publishes.WithLabelValues("error").Inc()
 		return Version{}, fmt.Errorf("sites: finalize: %w", err)
 	}
 	return out, err
@@ -372,8 +405,9 @@ func (s *Service) Publish(ctx context.Context, siteID string, by uuid.UUID, mode
 	return v, nil
 }
 
-func blobKey(siteID string, sum []byte) string {
-	return sitePrefix(siteID) + "blobs/" + hex.EncodeToString(sum)
+// BlobKey is the storage key of a site's blob.
+func BlobKey(siteID string, sum []byte) string {
+	return SitePrefix(siteID) + "blobs/" + hex.EncodeToString(sum)
 }
 
 func versionFromRow(r db.ListVersionsRow) Version {

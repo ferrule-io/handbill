@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ferrule-io/handbill/internal/config"
 	"github.com/ferrule-io/handbill/internal/rbac"
 	"github.com/ferrule-io/handbill/internal/server"
 	"github.com/ferrule-io/handbill/internal/sites"
@@ -48,9 +49,13 @@ func (c countingStore) Put(ctx context.Context, key string, r io.Reader, size in
 	return c.Store.Put(ctx, key, r, size, ct)
 }
 
-func newEnv(t *testing.T) *env {
+// newEnv returns a service over a fresh database; adjust lowers its limits.
+func newEnv(t *testing.T, adjust ...func(*config.Limits)) *env {
 	t.Helper()
 	d := sitestest.Deps(t)
+	for _, f := range adjust {
+		f(&d.Config.Limits)
+	}
 	puts := new(atomic.Int64)
 	d.Storage = countingStore{Store: d.Storage, puts: puts}
 	return &env{d: d, svc: sites.NewService(d), owner: sitestest.User(t, d, "owner@example.com"), puts: puts}
@@ -536,9 +541,9 @@ func TestArchive(t *testing.T) {
 }
 
 func TestArchiveRejects(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, func(l *config.Limits) { l.MaxFileSize, l.MaxArchiveEntries = 1<<10, 50 })
 	s := e.site(t)
-	big := string(make([]byte, sites.MaxFileSize+1))
+	big := string(make([]byte, e.svc.Limits().MaxFileSize+1))
 	cases := []struct {
 		name    string
 		entries []entry
@@ -563,7 +568,7 @@ func TestArchiveRejects(t *testing.T) {
 		}
 	}
 	var many []entry
-	for i := range sites.MaxArchiveEntries + 1 {
+	for i := range e.svc.Limits().MaxArchiveEntries + 1 {
 		many = append(many, entry{name: fmt.Sprintf("d%d/", i), kind: tar.TypeDir})
 	}
 	wantInputError(t, "too many entries", e.publishArchive(t, s.ID, tarGz(t, many...), "tar.gz"))
@@ -648,13 +653,13 @@ func TestZipCentralDirectoryBomb(t *testing.T) {
 	bomb := rawZip(200_000, 200_000, false)
 	var bombErr error
 	allocs := testing.AllocsPerRun(1, func() { bombErr = addZip(bomb) })
-	if allocs > sites.MaxArchiveEntries {
-		t.Fatalf("wrapped count: %v allocations, want fewer than %d", allocs, sites.MaxArchiveEntries)
+	if maxEntries := e.svc.Limits().MaxArchiveEntries; allocs > float64(maxEntries) {
+		t.Fatalf("wrapped count: %v allocations, want fewer than %d", allocs, maxEntries)
 	}
 	wantInputErrorContaining(t, "wrapped count", bombErr, "more than")
 
 	// A declared count over the cap, here through a zip64 end record.
-	wantInputErrorContaining(t, "zip64 declared", addZip(rawZip(1, sites.MaxArchiveEntries+1, true)), "more than")
+	wantInputErrorContaining(t, "zip64 declared", addZip(rawZip(1, uint64(e.svc.Limits().MaxArchiveEntries)+1, true)), "more than")
 }
 
 // paxRecord returns one PAX extended-header record, "<len> key=value\n".
@@ -688,7 +693,7 @@ func ustarHeader(name string, flag byte, size int) []byte {
 func TestTarGzMetadataBomb(t *testing.T) {
 	e := newEnv(t)
 	s := e.site(t)
-	sites.SetMaxTarStream(t, 1<<20)
+	sites.SetMaxTarStream(e.svc, 1<<20)
 	// 32 chained PAX headers of 64 KiB each, none an entry, then one small
 	// file: 2 MiB decompressed against a 1 MiB stream limit.
 	var buf bytes.Buffer
@@ -743,5 +748,47 @@ func TestUploadRacingSiteDelete(t *testing.T) {
 	sum := sha256.Sum256([]byte("late"))
 	if _, err := d.Storage.Stat(t.Context(), "sites/"+s.ID+"/blobs/"+hex.EncodeToString(sum[:])); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("blob left behind: %v", err)
+	}
+}
+
+func TestSiteLimits(t *testing.T) {
+	e := newEnv(t, func(l *config.Limits) { l.MaxFileSize, l.MaxSiteSize, l.MaxSiteFiles = 100, 250, 3 })
+	s := e.site(t)
+	ctx := t.Context()
+	body := func(n int) string { return strings.Repeat("x", n) }
+
+	// Per file.
+	_, err := e.svc.Publish(ctx, s.ID, e.owner, sites.Replace, []sites.File{file("big.html", body(101))}, nil)
+	wantInputError(t, "file over MAX_FILE_SIZE", err)
+
+	// At the limits exactly.
+	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Replace, []sites.File{file("a", body(100)), file("b", body(100)), file("c", body(50))}, nil)
+	must(t, err)
+
+	// Staging is bounded too: a replace deployment cannot exceed the file
+	// count or total size even before finalize.
+	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Replace, []sites.File{file("a", "1"), file("b", "2"), file("c", "3"), file("d", "4")}, nil)
+	wantInputError(t, "staged files over MAX_SITE_FILES", err)
+	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Replace, []sites.File{file("a", body(100)), file("b", body(100)), file("c", body(51))}, nil)
+	wantInputError(t, "staged bytes over MAX_SITE_SIZE", err)
+
+	// Merge: the deployment alone is small, the resulting version is not.
+	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Merge, []sites.File{file("d", "4")}, nil)
+	wantInputError(t, "merged version over MAX_SITE_FILES", err)
+	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Merge, []sites.File{file("c", body(51))}, nil)
+	wantInputError(t, "merged version over MAX_SITE_SIZE", err)
+
+	// A merge that replaces and deletes files stays within the limits.
+	_, err = e.svc.Publish(ctx, s.ID, e.owner, sites.Merge, []sites.File{file("d", body(100))}, []string{"a"})
+	must(t, err)
+	wantContents(t, e.contents(t, s.ID), map[string]string{"b": body(100), "c": body(50), "d": body(100)})
+
+	// Archives obey the same per-version limits.
+	err = e.publishArchive(t, s.ID, tarGz(t, entry{name: "1", body: "1"}, entry{name: "2", body: "2"}, entry{name: "3", body: "3"}, entry{name: "4", body: "4"}), "tar.gz")
+	wantInputError(t, "archive over MAX_SITE_FILES", err)
+	versions, err := e.svc.ListVersions(ctx, s.ID)
+	must(t, err)
+	if len(versions) != 2 {
+		t.Fatalf("rejected publishes created versions: %d", len(versions))
 	}
 }

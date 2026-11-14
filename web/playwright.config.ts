@@ -5,6 +5,9 @@ import { defineConfig, devices } from "@playwright/test"
 // the export. BASE_URL is the app origin; SITES_DOMAIN the sites parent domain.
 export default defineConfig({
   testDir: "./e2e",
+  // Builds the seeders and checks they share the server's database and
+  // storage (e2e/global-setup.ts).
+  globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? "github" : "list",

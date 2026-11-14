@@ -173,7 +173,7 @@ func TestUpload(t *testing.T) {
 	}
 
 	// Over the limit.
-	upload.SetMaxArchiveBytes(t, 64)
+	f.d.Config.Limits.MaxArchiveSize = 64
 	big := tarGz(map[string]string{"index.html": strings.Repeat("random-ish content ", 500) + uuid.NewString()})
 	if s, e := f.put(good, big); s != 413 || e != "too_large" {
 		t.Fatalf("too large: %d %s", s, e)

@@ -48,6 +48,12 @@ type Config struct {
 	OAuthDCREnabled bool
 	// InviteTTL is the lifetime of invites and ownership transfers (INVITE_TTL).
 	InviteTTL time.Duration
+
+	// Limits caps publishing and request sizes (limits.go).
+	Limits Limits
+	// Operations configures rate limits, metrics, maintenance, and
+	// shutdown (limits.go).
+	Operations Operations
 }
 
 // StorageType selects the storage adapter.
@@ -123,6 +129,8 @@ func Load(getenv func(string) string) (*Config, error) {
 		OAuthDCREnabled: l.boolean("OAUTH_DCR_ENABLED", false),
 		InviteTTL:       l.duration("INVITE_TTL", 14*24*time.Hour),
 	}
+	c.Limits = l.limits()
+	c.Operations = l.operations(c.ListenAddr)
 	c.AppOrigin, c.AppHost = l.appOrigin()
 	c.SitesDomain = l.sitesDomain()
 	if c.AppHost != "" && c.SitesDomain != "" &&

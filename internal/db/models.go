@@ -246,10 +246,10 @@ type Site struct {
 }
 
 type SiteBlob struct {
-	SiteID    string
-	Sha256    []byte
-	Size      int64
-	CreatedAt time.Time
+	SiteID   string
+	Sha256   []byte
+	Size     int64
+	StagedAt time.Time
 }
 
 type SiteTicket struct {
@@ -261,6 +261,11 @@ type SiteTicket struct {
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	ConsumedAt *time.Time
+}
+
+type StorageDeletion struct {
+	Prefix    string
+	CreatedAt time.Time
 }
 
 type User struct {

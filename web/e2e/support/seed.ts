@@ -1,14 +1,13 @@
-import { execFileSync } from "node:child_process"
-import path from "node:path"
-
 import type { BrowserContext } from "@playwright/test"
+
+import { runSeeder } from "./seeders"
 
 /**
  * Test-only seeding through internal/sites/e2eseed (a Go command, not a
  * server endpoint): it writes accounts, sessions, and published sites
  * straight into the database and storage the server under test uses, so it
- * needs the server's DATABASE_URL and storage variables in its environment
- * (mise.toml's [env] locally; the CI job sets them for the container).
+ * runs with this process's DATABASE_URL and storage variables, which must
+ * be the server's (see ./seeders.ts; global-setup.ts checks they are).
  */
 
 export type SeedFile = { path: string; text?: string; base64?: string }
@@ -23,24 +22,18 @@ export type SeedSpec = {
     /** Published in order (replace mode); the last one is live. */
     versions?: { files: SeedFile[] }[]
   }[]
+  /** Also publish a public-link probe site (global-setup.ts). */
+  probe?: boolean
 }
 
 export type SeedResult = {
   users: Record<string, { id: string; sessionToken: string }>
   sites: { id: string; versions: string[] }[]
+  probe?: { site: string; token: string; path: string; body: string }
 }
 
-const repoRoot = path.resolve(__dirname, "..", "..", "..")
-
 export function seed(spec: SeedSpec): SeedResult {
-  const out = execFileSync("go", ["run", "./internal/sites/e2eseed"], {
-    cwd: repoRoot,
-    input: JSON.stringify(spec),
-    env: process.env,
-    stdio: ["pipe", "pipe", "inherit"],
-    timeout: 180_000,
-  })
-  return JSON.parse(out.toString()) as SeedResult
+  return JSON.parse(runSeeder("sites", JSON.stringify(spec))) as SeedResult
 }
 
 /** A fresh address so repeated runs against one database never collide. */

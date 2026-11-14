@@ -11,12 +11,13 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ferrule-io/handbill/internal/metrics"
 	"github.com/ferrule-io/handbill/internal/sites"
 )
 
-// Limits on tool input (docs/design.md#mcp-tools).
+// Limits on tool input (docs/design.md#mcp-tools); the request body cap is
+// MAX_MCP_BODY (config.Limits).
 const (
-	maxRequestBodyBytes = 16 << 20 // MCP request body
 	maxFilesPerCall     = 1000
 	maxReadBytes        = 1 << 20 // read_file
 	defaultVersionLimit = 50
@@ -68,6 +69,7 @@ func addTool[In, Out any](s *mcpsdk.Server, env *Env, t *mcpsdk.Tool, patch func
 	mcpsdk.AddTool(s, t, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
 		out, err := h(ctx, in)
 		if err == nil {
+			metrics.MCPToolCalls.WithLabelValues(t.Name, "ok").Inc()
 			return nil, out, nil
 		}
 		var zero Out
@@ -75,10 +77,13 @@ func addTool[In, Out any](s *mcpsdk.Server, env *Env, t *mcpsdk.Tool, patch func
 		var ie *sites.InputError
 		switch {
 		case errors.As(err, &te):
+			metrics.MCPToolCalls.WithLabelValues(t.Name, "rejected").Inc()
 			return nil, zero, te
 		case errors.As(err, &ie):
+			metrics.MCPToolCalls.WithLabelValues(t.Name, "rejected").Inc()
 			return nil, zero, errors.New(ie.Msg)
 		}
+		metrics.MCPToolCalls.WithLabelValues(t.Name, "error").Inc()
 		env.Deps.Logger.Error("mcp tool failed", "tool", t.Name, "err", err)
 		return nil, zero, errors.New("internal error, try again")
 	})

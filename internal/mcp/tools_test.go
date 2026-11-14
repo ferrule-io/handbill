@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/ferrule-io/handbill/internal/config"
 	"github.com/ferrule-io/handbill/internal/oauth"
 	"github.com/ferrule-io/handbill/internal/server"
 	"github.com/ferrule-io/handbill/internal/sharing"
@@ -304,7 +305,7 @@ func TestStagedDeployment(t *testing.T) {
 
 	u := ok[uploadURLOut](t, r.manager, "get_upload_url", map[string]any{"site": r.site, "deployment_id": dep.DeploymentID})
 	parsed, err := url.Parse(u.UploadURL)
-	if err != nil || u.Method != "PUT" || u.MaxBytes != sites.MaxArchiveSize {
+	if err != nil || u.Method != "PUT" || u.MaxBytes != config.DefaultLimits().MaxArchiveSize {
 		t.Fatalf("get_upload_url: %+v", u)
 	}
 	g, err := e.env.Signer.ParseUploadGrant(parsed.Query().Get("grant"), time.Now())

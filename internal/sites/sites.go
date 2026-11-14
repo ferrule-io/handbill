@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ferrule-io/handbill/internal/config"
 	"github.com/ferrule-io/handbill/internal/db"
 	"github.com/ferrule-io/handbill/internal/rbac"
 	"github.com/ferrule-io/handbill/internal/server"
@@ -57,11 +58,21 @@ type Service struct {
 	db     *pgxpool.Pool
 	store  storage.Store
 	logger *slog.Logger
+	limits config.Limits
+	// maxTarStream caps a tar.gz archive's decompressed stream: file data
+	// plus tar headers, padding, and PAX and GNU metadata records, which
+	// do not count as entries.
+	maxTarStream int64
 }
 
-// NewService returns a Service over d.DB and d.Storage.
+// NewService returns a Service over d.DB and d.Storage with d.Config's
+// limits.
 func NewService(d *server.Deps) *Service {
-	return &Service{db: d.DB, store: d.Storage, logger: d.Logger}
+	l := d.Config.Limits
+	return &Service{
+		db: d.DB, store: d.Storage, logger: d.Logger, limits: l,
+		maxTarStream: l.MaxArchiveSize + int64(l.MaxArchiveEntries)*tarOverheadPerEntry,
+	}
 }
 
 // Site is a site's metadata.
@@ -184,23 +195,31 @@ func (s *Service) Update(ctx context.Context, id string, title, description *str
 
 // Delete deletes the site with everything that belongs to it in the
 // database, then its storage prefix sites/<id>/. Viewers stop seeing it as
-// soon as the database delete commits; if storage cleanup fails the error
-// is returned and the orphaned objects are left for blob GC.
+// soon as the database delete commits. The prefix is queued for deletion
+// in the same transaction, so if storage cleanup fails here (the error is
+// returned) maintenance retries it.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	if !siteid.Valid(id) {
 		return ErrNotFound
 	}
-	n, err := db.New(s.db).DeleteSite(ctx, id)
+	prefix := SitePrefix(id)
+	err := db.InTx(ctx, s.db, func(q *db.Queries) error {
+		n, err := q.DeleteSite(ctx, id)
+		if err != nil {
+			return fmt.Errorf("sites: delete: %w", err)
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return q.QueueStorageDeletion(ctx, prefix)
+	})
 	if err != nil {
-		return fmt.Errorf("sites: delete: %w", err)
+		return err
 	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	if err := s.store.DeletePrefix(ctx, sitePrefix(id)); err != nil {
+	if err := s.store.DeletePrefix(ctx, prefix); err != nil {
 		return fmt.Errorf("sites: delete storage for %s: %w", id, err)
 	}
-	return nil
+	return db.New(s.db).DeleteStorageDeletion(ctx, prefix)
 }
 
 // ListForUser returns every site user has a role on, most recently
@@ -276,4 +295,5 @@ func isForeignKeyViolation(err error) bool {
 	return errors.As(err, &pe) && pe.Code == "23503"
 }
 
-func sitePrefix(siteID string) string { return "sites/" + siteID + "/" }
+// SitePrefix is the storage prefix holding a site's objects.
+func SitePrefix(siteID string) string { return "sites/" + siteID + "/" }

@@ -298,6 +298,91 @@ The chart applies Kubernetes security best practices out-of-the-box:
 - **Startup & Health Probes**: A `startupProbe` on `/healthz` provides up to 150 seconds for PostgreSQL initialization and database migrations to complete before `livenessProbe` and `readinessProbe` start checking the pod.
 - **Component Labeling & Port Forwarding**: The application Deployment and Service use `app.kubernetes.io/component: app` to ensure the application Service and port-forward commands target only handbill application pods, not the bundled PostgreSQL StatefulSet pod (`app.kubernetes.io/component: postgresql`).
 
+## Operations
+
+### Limits and rate limits
+
+`limits.*` sets the publishing and request size caps (`MAX_*` variables; see
+`docs/design.md#configuration`). Rate limits on sign-up, sign-in, recovery,
+OAuth, invites, `/mcp`, archive uploads, and site hosts are on by default
+(`rateLimit.enabled`). They are **in memory and per replica**: with N
+replicas a client gets up to N times each limit, and a restart resets them.
+
+Behind an ingress or load balancer, set `rateLimit.trustedProxies` to the
+CIDRs the proxy connects from (for an in-cluster ingress controller, the pod
+CIDR), so handbill takes the client address from `X-Forwarded-For`. Left
+empty, every client appears as the proxy and shares one set of limits;
+entries from untrusted peers are never believed.
+
+### Metrics
+
+`metrics.enabled=true` serves Prometheus `/metrics` on `metrics.port` (a
+separate listener, never the public service) and adds a ClusterIP
+`<release>-metrics` Service; `metrics.serviceMonitor.enabled=true` adds a
+Prometheus Operator `ServiceMonitor`. Series: `handbill_http_requests_total`
+and `handbill_http_request_duration_seconds` (by host class and route
+pattern), `handbill_mcp_tool_calls_total`, `handbill_publishes_total`,
+`handbill_rate_limited_total`, `handbill_maintenance_*`, `handbill_db_pool_*`,
+plus Go runtime and process metrics.
+
+### Graceful shutdown
+
+On SIGTERM the server stops accepting connections and gives in-flight
+requests `shutdownTimeout` (25 s) to finish. `preStopSleepSeconds` (5 s)
+keeps the pod serving while it is removed from the endpoints first; keep
+`terminationGracePeriodSeconds` above the sum of both.
+
+### Maintenance
+
+Every `maintenance.interval` one replica (a PostgreSQL advisory lock picks
+it) deletes expired sessions, tickets, sign-in flows, verification links,
+and OAuth requests, codes, and tokens; unused OAuth clients; expired or
+revoked invites and transfers after 30 days; abandons deployments left open
+for 24 h and deletes them after 7 days; retries storage cleanup of deleted
+sites; and deletes blobs no version or open deployment uses once they are
+older than `maintenance.blobGCGrace` (24 h, at least 1 h).
+
+## Backup and Restore
+
+handbill's state is the PostgreSQL database plus the blob store. The
+database says which blobs exist; blobs are immutable and content-addressed
+(`sites/<site-id>/blobs/<sha256>`), and nothing but blob GC and site
+deletion removes them. Back up and restore so the database never refers to
+blobs the storage lacks:
+
+1. **Back up the database first, then the storage.** Blobs written after the
+   dump are harmless extras (GC collects them); a database newer than the
+   storage copy would point at missing blobs.
+2. **Keep blob GC from running against a restored database until the
+   storage is restored too**: scale the Deployment to 0 (or set
+   `maintenance.interval` very long) during the restore, restore the
+   database, restore the storage, then scale back up. GC against an old
+   database could otherwise delete blobs that newer copies still need.
+3. Take the two copies close together. A site deleted (or a staged blob
+   collected) between the database dump and the storage copy leaves the
+   dump referring to objects the copy lacks; with bucket versioning those
+   objects can still be restored from their previous versions.
+
+**Database.** Bundled PostgreSQL (`postgresql.enabled=true`):
+
+```bash
+kubectl exec -n <ns> statefulset/<release>-postgresql -- \
+  pg_dump -U handbill -d handbill -Fc > handbill.dump
+# restore into an empty database, with handbill scaled to 0:
+kubectl exec -i -n <ns> statefulset/<release>-postgresql -- \
+  pg_restore -U handbill -d handbill --clean --if-exists --no-owner < handbill.dump
+```
+
+External PostgreSQL: use your provider's snapshots or point-in-time recovery,
+or `pg_dump -Fc` / `pg_restore` the same way against `externalDatabase.*`.
+handbill applies any newer migrations at startup.
+
+**Storage.** S3 or GCS: enable bucket (object) versioning, or replicate the
+bucket; restoring means pointing `storage.*` at the copy, or restoring
+object versions from before the incident. `local`: snapshot the PVC with a
+`VolumeSnapshot` (CSI driver required) or copy `/data` from a pod; restore
+by binding the PVC to the snapshot.
+
 ## Releasing
 
 Releases are driven entirely by git tags.
@@ -313,7 +398,7 @@ To release a new version of Handbill:
    git push origin v0.1.0
    ```
 3. The `.github/workflows/release.yaml` workflow triggers on tag push:
-   - **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile`, tags them as `vX.Y.Z`, `X.Y`, and `latest` (for non-prerelease tags), and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
+   - **Image**: Builds multi-arch container images (`linux/amd64`, `linux/arm64`) from the `Dockerfile` with `VERSION`/`COMMIT` build args (reported by `handbill --version`, the startup log, and the MCP server info), tags them as `vX.Y.Z`, `X.Y`, and `latest` (for non-prerelease tags), and pushes them to `ghcr.io/ferrule-io/handbill` with SLSA provenance and SBOM attestations.
    - **Chart**: Synchronizes `version` and `appVersion` in `deploy/helm/handbill/Chart.yaml` to the tag version, runs `helm lint`, packages the chart, and pushes the OCI package to `oci://ghcr.io/ferrule-io/charts`.
    - **GitHub Release**: Drafts and publishes a GitHub release with automatically generated changelog release notes and attaches the packaged `handbill-*.tgz` chart bundle.
 
@@ -383,3 +468,14 @@ Dry runs can be triggered manually via `workflow_dispatch` in GitHub Actions by 
 | `podSecurityContext` | Pod security context (UID/GID 65532) | See `values.yaml` |
 | `securityContext` | Container security context (drop ALL, readOnlyRoot) | See `values.yaml` |
 | `resources` | Resource requests and limits | `{}` |
+| `limits.*` | Publishing and request size caps (`MAX_*`); see `values.yaml` | 64MiB file, 1GiB / 10000 files per version, 512MiB / 10000-entry archives, 16MiB `/mcp`, 1MiB JSON |
+| `rateLimit.enabled` | Per-replica in-memory rate limits | `true` |
+| `rateLimit.trustedProxies` | CIDRs allowed to set `X-Forwarded-For` | `[]` |
+| `metrics.enabled` | Serve `/metrics` on a separate port and Service | `false` |
+| `metrics.port` | Metrics listener port | `9090` |
+| `metrics.serviceMonitor.enabled` | Create a Prometheus Operator ServiceMonitor | `false` |
+| `maintenance.interval` | How often one replica runs cleanup | `15m` |
+| `maintenance.blobGCGrace` | Minimum age of an unreferenced blob before deletion | `24h` |
+| `shutdownTimeout` | Drain time for in-flight requests on SIGTERM | `25s` |
+| `preStopSleepSeconds` | Pause before SIGTERM while endpoints update (0 disables) | `5` |
+| `terminationGracePeriodSeconds` | Pod termination grace period | `40` |

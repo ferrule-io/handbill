@@ -220,6 +220,50 @@ oauth:
 # Invite and ownership transfer token time-to-live (Go duration string)
 inviteTTL: "336h"
 
+# Publishing and request size limits (MAX_* variables). Sizes accept plain
+# bytes or KiB/MiB/GiB/TiB suffixes.
+limits:
+  maxFileSize: "64MiB"        # one file
+  maxSiteSize: "1GiB"         # all files of one version
+  maxSiteFiles: 10000         # files in one version
+  maxArchiveSize: "512MiB"    # one uploaded .tar.gz/.zip, compressed and uncompressed
+  maxArchiveEntries: 10000    # entries in one archive
+  maxMCPBody: "16MiB"         # one /mcp request
+  maxJSONBody: "1MiB"         # one /app-api request
+
+# In-memory rate limits on sign-in, OAuth, invites, /mcp, uploads, and site
+# hosts. They are per replica: N replicas allow up to N times each limit.
+rateLimit:
+  enabled: true
+  # CIDRs of the proxies in front of handbill (ingress controller pods, load
+  # balancer). Only these may set X-Forwarded-For. Leaving it empty behind
+  # an ingress makes every client share the proxy's limits; set it to the
+  # pod or node CIDR the ingress connects from, e.g. ["10.0.0.0/8"].
+  trustedProxies: []
+
+# Prometheus /metrics on a separate port, never on the public service.
+metrics:
+  enabled: false
+  port: 9090
+  # A ServiceMonitor for the Prometheus Operator (needs its CRDs).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# Background cleanup, run by one replica at a time.
+maintenance:
+  interval: "15m"
+  # Unreferenced blobs are deleted only once this old (at least 1h).
+  blobGCGrace: "24h"
+
+# Graceful shutdown: on SIGTERM in-flight requests get shutdownTimeout to
+# finish. preStopSleepSeconds keeps serving while the pod leaves the
+# endpoints first (0 disables; needs Kubernetes 1.30+).
+shutdownTimeout: "25s"
+preStopSleepSeconds: 5
+terminationGracePeriodSeconds: 40
+
 resources: {}
   # limits:
   #   cpu: 500m

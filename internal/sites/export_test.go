@@ -1,10 +1,4 @@
 package sites
 
-import "testing"
-
-// SetMaxTarStream lowers the tar.gz decompressed-stream limit for one test.
-func SetMaxTarStream(t *testing.T, n int64) {
-	old := maxTarStream
-	maxTarStream = n
-	t.Cleanup(func() { maxTarStream = old })
-}
+// SetMaxTarStream lowers s's tar.gz decompressed-stream limit.
+func SetMaxTarStream(s *Service, n int64) { s.maxTarStream = n }

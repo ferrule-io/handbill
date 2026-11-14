@@ -24,6 +24,12 @@
 // Each user gets a verified primary email and a 24-hour session; a browser
 // is signed in by setting the cookie __Host-session to sessionToken on the
 // app host. Versions publish in order (replace mode), so the last is current.
+//
+// With "probe": true the seeder also publishes a probe site with a public
+// link and returns {"probe": {"site", "token", "path", "body"}}. The
+// Playwright global setup opens it through the server under test: if the
+// server answers with a different body, the seeder and the server use
+// different databases or storage, and the run stops before any spec.
 package main
 
 import (
@@ -66,6 +72,7 @@ type spec struct {
 			} `json:"files"`
 		} `json:"versions"`
 	} `json:"sites"`
+	Probe bool `json:"probe"`
 }
 
 type userOut struct {
@@ -76,6 +83,13 @@ type userOut struct {
 type siteOut struct {
 	ID       string      `json:"id"`
 	Versions []uuid.UUID `json:"versions"`
+}
+
+type probeOut struct {
+	Site  string `json:"site"`
+	Token string `json:"token"`
+	Path  string `json:"path"`
+	Body  string `json:"body"`
 }
 
 func main() {
@@ -154,7 +168,13 @@ func run() error {
 	out := struct {
 		Users map[string]userOut `json:"users"`
 		Sites []siteOut          `json:"sites"`
+		Probe *probeOut          `json:"probe,omitempty"`
 	}{Users: users, Sites: []siteOut{}}
+	if in.Probe {
+		if out.Probe, err = probe(ctx, q, svc); err != nil {
+			return fmt.Errorf("probe: %w", err)
+		}
+	}
 	for _, s := range in.Sites {
 		owner, err := user(s.Owner)
 		if err != nil {
@@ -197,4 +217,28 @@ func run() error {
 		out.Sites = append(out.Sites, so)
 	}
 	return json.NewEncoder(os.Stdout).Encode(out)
+}
+
+// probe publishes a site with a random body behind a public link, owned by
+// a fresh account.
+func probe(ctx context.Context, q *db.Queries, svc *sites.Service) (*probeOut, error) {
+	owner, err := q.CreateUser(ctx, uuid.Must(uuid.NewV7()))
+	if err != nil {
+		return nil, err
+	}
+	site, err := svc.Create(ctx, owner.ID, "e2e storage probe", "")
+	if err != nil {
+		return nil, err
+	}
+	body, _ := token.New()
+	p := &probeOut{Site: site.ID, Path: "/probe.txt", Body: "e2e probe " + body}
+	if _, err := svc.Publish(ctx, site.ID, owner.ID, sites.Replace, []sites.File{{Path: "probe.txt", Body: []byte(p.Body)}}, nil); err != nil {
+		return nil, err
+	}
+	tok, hash := token.New()
+	if _, err := q.EnablePublicLink(ctx, db.EnablePublicLinkParams{SiteID: site.ID, TokenHash: hash}); err != nil {
+		return nil, err
+	}
+	p.Token = tok
+	return p, nil
 }

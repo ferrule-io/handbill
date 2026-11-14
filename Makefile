@@ -3,6 +3,10 @@
 
 WEB_DIST := internal/webui/dist
 IMAGE    ?= handbill:dev
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT   ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+LDFLAGS  := -X github.com/ferrule-io/handbill/internal/version.Version=$(VERSION) \
+            -X github.com/ferrule-io/handbill/internal/version.Commit=$(COMMIT)
 
 .PHONY: all web build run db-up db-down test vet lint web-lint web-typecheck e2e docker clean kind-smoke
 
@@ -16,7 +20,7 @@ web:
 
 ## build: compile the server (embeds whatever is in internal/webui/dist)
 build:
-	CGO_ENABLED=0 go build -trimpath -o bin/handbill ./cmd/handbill
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/handbill ./cmd/handbill
 
 ## run: build everything and start the server against the Compose database
 run: web build db-up
@@ -47,7 +51,7 @@ e2e:
 	cd web && pnpm test:e2e
 
 docker:
-	docker build -t $(IMAGE) .
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t $(IMAGE) .
 
 ## kind-smoke: run kind-based Helm chart smoke tests
 kind-smoke:

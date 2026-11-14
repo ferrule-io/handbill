@@ -237,7 +237,7 @@ func TestReadJSON(t *testing.T) {
 		{"application/json", `{"name":"a","extra":1}`, 400, "invalid_json"},
 		{"application/json", `{"name":"a"} {}`, 400, "invalid_json"},
 		{"application/json", `{"name":`, 400, "invalid_json"},
-		{"application/json", `{"name":"` + strings.Repeat("a", MaxBodyBytes) + `"}`, 413, "too_large"},
+		{"application/json", `{"name":"` + strings.Repeat("a", int(config.DefaultLimits().MaxJSONBody)) + `"}`, 413, "too_large"},
 	}
 	for _, tc := range tests {
 		rec := post(tc.ct, tc.body)

@@ -24,7 +24,7 @@ func Register(r *server.Routes, d *server.Deps) error {
 		Stateless:                  true,
 		JSONResponse:               true,
 		DisableLocalhostProtection: true, // see checkOrigin
-		MaxRequestBodyBytes:        maxRequestBodyBytes,
+		MaxRequestBodyBytes:        d.Config.Limits.MaxMCPBody,
 	})
 	handler := checkOrigin(d.Config, oauth.RequireBearer(d, h))
 	// Each method separately: a bare "/mcp" would conflict with webui's

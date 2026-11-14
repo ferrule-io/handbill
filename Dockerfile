@@ -19,9 +19,14 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY --from=web /src/web/out/ internal/webui/dist/
+# Set by `make docker` and the release workflow (handbill --version).
+ARG VERSION=dev
+ARG COMMIT=unknown
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/handbill ./cmd/handbill
+    CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X github.com/ferrule-io/handbill/internal/version.Version=${VERSION} -X github.com/ferrule-io/handbill/internal/version.Commit=${COMMIT}" \
+    -o /out/handbill ./cmd/handbill
 # Local storage root, owned by the distroless nonroot user (65532).
 RUN mkdir -p /out/data
 

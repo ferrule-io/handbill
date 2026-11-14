@@ -22,9 +22,6 @@ import (
 	"github.com/ferrule-io/handbill/internal/server"
 )
 
-// MaxBodyBytes caps request bodies read by ReadJSON.
-const MaxBodyBytes = 1 << 20
-
 // CSRFCookie holds the browser's CSRF secret. The __Host- prefix keeps site
 // hosts (same-site subdomains) from setting or overwriting it.
 const CSRFCookie = "__Host-csrf"
@@ -77,6 +74,7 @@ func handler(d *server.Deps, h Handler, o options) http.Handler {
 			writeError(w, err)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, d.Config.Limits.MaxJSONBody)
 		if err := h(w, r); err != nil {
 			var apiErr *Error
 			if !errors.As(err, &apiErr) {
@@ -176,19 +174,20 @@ func writeError(w http.ResponseWriter, e *Error) {
 }
 
 // ReadJSON decodes a JSON request body into v. The body must be
-// application/json, at most MaxBodyBytes, a single value, and contain no
-// fields v does not declare. Failures are *Error values.
+// application/json, at most MAX_JSON_BODY (enforced by Handle), a single
+// value, and contain no fields v does not declare. Failures are *Error
+// values.
 func ReadJSON(r *http.Request, v any) error {
 	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mt != "application/json" {
 		return NewError(http.StatusUnsupportedMediaType, "unsupported_media_type", "Send the request body as application/json.")
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
+	body, err := io.ReadAll(r.Body)
+	if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
+		return NewError(http.StatusRequestEntityTooLarge, "too_large", "The request body is too large.")
+	}
 	if err != nil {
 		return NewError(http.StatusBadRequest, "invalid_json", "The request body could not be read.")
-	}
-	if len(body) > MaxBodyBytes {
-		return NewError(http.StatusRequestEntityTooLarge, "too_large", "The request body is too large.")
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()

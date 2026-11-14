@@ -23,6 +23,7 @@ import (
 	"github.com/ferrule-io/handbill/internal/sharing"
 	"github.com/ferrule-io/handbill/internal/sites"
 	"github.com/ferrule-io/handbill/internal/token"
+	"github.com/ferrule-io/handbill/internal/version"
 )
 
 // Env is what tool handlers receive.
@@ -43,7 +44,7 @@ const instructions = `handbill hosts static websites (HTML, CSS, JavaScript, ima
 // NewServer returns an MCP server with every toolset. Server logging stays
 // off: it could include file contents.
 func NewServer(env *Env) *mcpsdk.Server {
-	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "handbill", Title: "handbill", Version: "0.1"},
+	s := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "handbill", Title: "handbill", Version: version.Version},
 		&mcpsdk.ServerOptions{Instructions: instructions})
 	for _, add := range toolsets {
 		add(s, env)

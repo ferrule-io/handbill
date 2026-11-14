@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
-import path from "node:path"
+
+import { runSeeder } from "./seeders"
 
 /**
  * Registers the test CIMD client through internal/oauth/e2eseed (a Go
@@ -8,13 +8,7 @@ import path from "node:path"
  * environment like ./seed.ts.
  */
 export function seedClient(): { clientId: string; redirectUri: string } {
-  const out = execFileSync("go", ["run", "./internal/oauth/e2eseed"], {
-    cwd: path.resolve(__dirname, "..", "..", ".."),
-    env: process.env,
-    stdio: ["ignore", "pipe", "inherit"],
-    timeout: 180_000,
-  })
-  return JSON.parse(out.toString()) as { clientId: string; redirectUri: string }
+  return JSON.parse(runSeeder("oauth")) as { clientId: string; redirectUri: string }
 }
 
 /** A PKCE verifier and its S256 challenge. */

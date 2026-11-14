@@ -1,0 +1,42 @@
+{{- if .Values.metrics.enabled }}
+# /metrics is served on its own port; this ClusterIP service exists only
+# for scraping and is never routed by the ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "handbill.fullname" . }}-metrics
+  labels:
+    {{- include "handbill.labels" . | nindent 4 }}
+    handbill.ferrule.io/metrics: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "handbill.selectorLabels" . | nindent 4 }}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "handbill.fullname" . }}
+  labels:
+    {{- include "handbill.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "handbill.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      handbill.ferrule.io/metrics: "true"
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
+{{- end }}

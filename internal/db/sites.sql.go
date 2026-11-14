@@ -87,7 +87,7 @@ func (q *Queries) CreateSite(ctx context.Context, arg CreateSiteParams) (Site, e
 
 const createSiteBlob = `-- name: CreateSiteBlob :exec
 INSERT INTO site_blobs (site_id, sha256, size) VALUES ($1, $2, $3)
-ON CONFLICT (site_id, sha256) DO NOTHING
+ON CONFLICT (site_id, sha256) DO UPDATE SET staged_at = now()
 `
 
 type CreateSiteBlobParams struct {
@@ -200,6 +200,23 @@ func (q *Queries) DeleteSite(ctx context.Context, id string) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deploymentTotals = `-- name: DeploymentTotals :one
+SELECT count(*)::int AS files, coalesce(sum(size), 0)::bigint AS bytes
+FROM deployment_files WHERE deployment_id = $1 AND NOT deleted
+`
+
+type DeploymentTotalsRow struct {
+	Files int32
+	Bytes int64
+}
+
+func (q *Queries) DeploymentTotals(ctx context.Context, deploymentID uuid.UUID) (DeploymentTotalsRow, error) {
+	row := q.db.QueryRow(ctx, deploymentTotals, deploymentID)
+	var i DeploymentTotalsRow
+	err := row.Scan(&i.Files, &i.Bytes)
+	return i, err
 }
 
 const findVersionFile = `-- name: FindVersionFile :one
@@ -540,20 +557,23 @@ func (q *Queries) SetCurrentVersion(ctx context.Context, arg SetCurrentVersionPa
 	return result.RowsAffected(), nil
 }
 
-const siteBlobExists = `-- name: SiteBlobExists :one
-SELECT EXISTS (SELECT 1 FROM site_blobs WHERE site_id = $1 AND sha256 = $2)
+const touchSiteBlob = `-- name: TouchSiteBlob :execrows
+UPDATE site_blobs SET staged_at = now() WHERE site_id = $1 AND sha256 = $2
 `
 
-type SiteBlobExistsParams struct {
+type TouchSiteBlobParams struct {
 	SiteID string
 	Sha256 []byte
 }
 
-func (q *Queries) SiteBlobExists(ctx context.Context, arg SiteBlobExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, siteBlobExists, arg.SiteID, arg.Sha256)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
+// TouchSiteBlob marks an existing blob as just staged, keeping blob GC
+// (maintenance.sql) away from it; 0 rows means the site lacks the blob.
+func (q *Queries) TouchSiteBlob(ctx context.Context, arg TouchSiteBlobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, touchSiteBlob, arg.SiteID, arg.Sha256)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateSite = `-- name: UpdateSite :one
@@ -585,5 +605,22 @@ func (q *Queries) UpdateSite(ctx context.Context, arg UpdateSiteParams) (Site, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const versionTotals = `-- name: VersionTotals :one
+SELECT count(*)::int AS files, coalesce(sum(size), 0)::bigint AS bytes
+FROM version_files WHERE version_id = $1
+`
+
+type VersionTotalsRow struct {
+	Files int32
+	Bytes int64
+}
+
+func (q *Queries) VersionTotals(ctx context.Context, versionID uuid.UUID) (VersionTotalsRow, error) {
+	row := q.db.QueryRow(ctx, versionTotals, versionID)
+	var i VersionTotalsRow
+	err := row.Scan(&i.Files, &i.Bytes)
 	return i, err
 }

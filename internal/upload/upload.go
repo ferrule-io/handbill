@@ -66,7 +66,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The format is sniffed: curl -T sends no Content-Type.
-	limited := &limitReader{r: http.MaxBytesReader(w, r.Body, maxArchiveBytes)}
+	limited := &limitReader{r: http.MaxBytesReader(w, r.Body, h.d.Config.Limits.MaxArchiveSize)}
 	body := bufio.NewReader(limited)
 	magic, _ := body.Peek(4)
 	var format string
@@ -106,7 +106,7 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 	writeErr(w, http.StatusInternalServerError, "internal", "Something went wrong on our side. Try again.")
 }
 
-// limitReader records whether the body exceeded maxArchiveBytes: archive
+// limitReader records whether the body exceeded MAX_ARCHIVE_SIZE: archive
 // readers report the failure as an invalid archive.
 type limitReader struct {
 	r        io.Reader

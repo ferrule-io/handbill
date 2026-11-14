@@ -70,6 +70,10 @@ jobs:
           push: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # handbill --version, the startup log, and the MCP server version.
+          build-args: |
+            VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-{0}', github.sha) }}
+            COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

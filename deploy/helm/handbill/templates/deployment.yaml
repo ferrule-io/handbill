@@ -47,6 +47,9 @@ spec:
       automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Longer than SHUTDOWN_TIMEOUT plus the preStop pause, so in-flight
+      # requests drain before the kubelet kills the container.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -57,6 +60,19 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          {{- if gt (int .Values.preStopSleepSeconds) 0 }}
+          # Keep serving while the endpoint is removed from load balancers,
+          # then SIGTERM starts the graceful drain.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          {{- end }}
           startupProbe:
             httpGet:
               path: /healthz
@@ -98,6 +114,32 @@ spec:
               value: {{ .Values.oauth.dcrEnabled | default false | quote }}
             - name: INVITE_TTL
               value: {{ .Values.inviteTTL | default "336h" | quote }}
+            - name: MAX_FILE_SIZE
+              value: {{ .Values.limits.maxFileSize | quote }}
+            - name: MAX_SITE_SIZE
+              value: {{ .Values.limits.maxSiteSize | quote }}
+            - name: MAX_SITE_FILES
+              value: {{ .Values.limits.maxSiteFiles | quote }}
+            - name: MAX_ARCHIVE_SIZE
+              value: {{ .Values.limits.maxArchiveSize | quote }}
+            - name: MAX_ARCHIVE_ENTRIES
+              value: {{ .Values.limits.maxArchiveEntries | quote }}
+            - name: MAX_MCP_BODY
+              value: {{ .Values.limits.maxMCPBody | quote }}
+            - name: MAX_JSON_BODY
+              value: {{ .Values.limits.maxJSONBody | quote }}
+            - name: RATE_LIMIT_ENABLED
+              value: {{ .Values.rateLimit.enabled | quote }}
+            - name: TRUSTED_PROXIES
+              value: {{ join "," .Values.rateLimit.trustedProxies | quote }}
+            - name: METRICS_ADDR
+              value: {{ if .Values.metrics.enabled }}{{ printf ":%v" .Values.metrics.port | quote }}{{ else }}""{{ end }}
+            - name: MAINTENANCE_INTERVAL
+              value: {{ .Values.maintenance.interval | quote }}
+            - name: BLOB_GC_GRACE
+              value: {{ .Values.maintenance.blobGCGrace | quote }}
+            - name: SHUTDOWN_TIMEOUT
+              value: {{ .Values.shutdownTimeout | quote }}
 {{- if .Values.postgresql.enabled }}
             - name: PGHOST
               value: {{ include "handbill.postgresqlFullname" . | quote }}

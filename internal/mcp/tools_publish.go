@@ -245,7 +245,7 @@ func addPublishTools(s *mcpsdk.Server, env *Env) {
 			UploadURL: upload.URL(env.Deps.Config, env.Signer, g),
 			Method:    "PUT",
 			ExpiresAt: ts(g.Expires),
-			MaxBytes:  sites.MaxArchiveSize,
+			MaxBytes:  env.Sites.Limits().MaxArchiveSize,
 			Formats:   []string{"tar.gz", "zip"},
 			Example:   "curl --fail-with-body -T site.tar.gz '<upload_url>'",
 		}, nil

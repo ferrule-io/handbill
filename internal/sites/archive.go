@@ -19,16 +19,18 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/ferrule-io/handbill/internal/config"
 )
 
 // AddArchive extracts a "tar.gz" or "zip" archive into an open deployment
 // created by by, like AddFiles for every regular file in it. Entries are
 // streamed and validated: absolute paths, "..", and other invalid paths
 // (CleanPath), symlinks, hard links, devices, and other special entries
-// reject the whole archive, as do more than MaxArchiveEntries entries
+// reject the whole archive, as do more than MAX_ARCHIVE_ENTRIES entries
 // (declared or present in a zip's central directory), a file over
-// MaxFileSize, or more than MaxArchiveSize uncompressed bytes (for tar.gz,
-// more than maxTarStream decompressed bytes including tar metadata).
+// MAX_FILE_SIZE, or more than MAX_ARCHIVE_SIZE uncompressed bytes (for
+// tar.gz, more than maxTarStream decompressed bytes including tar metadata).
 // Directory entries are skipped. When every file sits under one common
 // top-level directory (as `tar czf site.tar.gz site/` produces), that
 // directory is stripped, so site/index.html publishes as index.html.
@@ -38,7 +40,7 @@ func (s *Service) AddArchive(ctx context.Context, deployment, by uuid.UUID, r io
 	if err != nil {
 		return err
 	}
-	x := &extractor{ctx: ctx, svc: s, siteID: d.SiteID}
+	x := &extractor{ctx: ctx, svc: s, lim: s.limits, siteID: d.SiteID}
 	switch format {
 	case "tar.gz":
 		err = x.tarGz(r)
@@ -63,23 +65,24 @@ func (s *Service) AddArchive(ctx context.Context, deployment, by uuid.UUID, r io
 type extractor struct {
 	ctx     context.Context
 	svc     *Service
+	lim     config.Limits
 	siteID  string
 	entries int
 	total   int64
 	files   []staged
 }
 
-// entry counts one archive entry against MaxArchiveEntries.
+// entry counts one archive entry against MAX_ARCHIVE_ENTRIES.
 func (x *extractor) entry() error {
 	x.entries++
-	if x.entries > MaxArchiveEntries {
-		return tooManyEntries()
+	if x.entries > x.lim.MaxArchiveEntries {
+		return x.tooManyEntries()
 	}
 	return x.ctx.Err()
 }
 
-func tooManyEntries() error {
-	return inputErrorf("archive has more than %d entries", MaxArchiveEntries)
+func (x *extractor) tooManyEntries() error {
+	return inputErrorf("archive has more than %d entries", x.lim.MaxArchiveEntries)
 }
 
 // dir validates a directory entry's name; directories are not published.
@@ -101,20 +104,21 @@ func (x *extractor) file(name string, declared int64, r io.Reader) error {
 	if err != nil {
 		return archiveErr(err)
 	}
-	if declared > MaxFileSize {
-		return inputErrorf("archive file %q is larger than %d bytes", p, MaxFileSize)
+	maxFile, maxArchive := x.lim.MaxFileSize, x.lim.MaxArchiveSize
+	if declared > maxFile {
+		return inputErrorf("archive file %q is larger than %d bytes", p, maxFile)
 	}
-	remaining := MaxArchiveSize - x.total
-	sp, err := spool(r, min(MaxFileSize, remaining))
+	remaining := maxArchive - x.total
+	sp, err := spool(r, min(maxFile, remaining))
 	if err != nil {
 		if errors.Is(err, errArchiveTooLarge) {
 			return err // the whole stream's limit, reported by the caller
 		}
 		if errors.Is(err, errTooLarge) {
-			if remaining < MaxFileSize {
-				return inputErrorf("archive is larger than %d bytes uncompressed", MaxArchiveSize)
+			if remaining < maxFile {
+				return inputErrorf("archive is larger than %d bytes uncompressed", maxArchive)
 			}
-			return inputErrorf("archive file %q is larger than %d bytes", p, MaxFileSize)
+			return inputErrorf("archive file %q is larger than %d bytes", p, maxFile)
 		}
 		return fmt.Errorf("sites: read archive file %q: %w", p, err)
 	}
@@ -140,12 +144,12 @@ func (x *extractor) tarGz(r io.Reader) error {
 	// forever, and the decompressed stream, so chained PAX or GNU
 	// long-name headers, which are not entries and carry no file bytes,
 	// cannot either.
-	zr, err := gzip.NewReader(&limitedReader{r: r, n: MaxArchiveSize, err: errArchiveTooLarge})
+	zr, err := gzip.NewReader(&limitedReader{r: r, n: x.lim.MaxArchiveSize, err: errArchiveTooLarge})
 	if err != nil {
 		return inputErrorf("invalid tar.gz archive: %v", err)
 	}
 	defer zr.Close()
-	tr := tar.NewReader(&limitedReader{r: zr, n: maxTarStream, err: errArchiveTooLarge})
+	tr := tar.NewReader(&limitedReader{r: zr, n: x.svc.maxTarStream, err: errArchiveTooLarge})
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -155,7 +159,7 @@ func (x *extractor) tarGz(r io.Reader) error {
 			return inputErrorf("archive contains an insecure path")
 		}
 		if errors.Is(err, errTooLarge) {
-			return inputErrorf("archive is larger than %d bytes", MaxArchiveSize)
+			return inputErrorf("archive is larger than %d bytes", x.lim.MaxArchiveSize)
 		}
 		if err != nil {
 			return inputErrorf("invalid tar.gz archive: %v", err)
@@ -178,7 +182,7 @@ func (x *extractor) tarGz(r io.Reader) error {
 			err = inputErrorf("archive entry %q: unsupported entry type %q", h.Name, h.Typeflag)
 		}
 		if errors.Is(err, errTooLarge) {
-			return inputErrorf("archive is larger than %d bytes", MaxArchiveSize)
+			return inputErrorf("archive is larger than %d bytes", x.lim.MaxArchiveSize)
 		}
 		if err != nil {
 			return err
@@ -189,15 +193,15 @@ func (x *extractor) tarGz(r io.Reader) error {
 func (x *extractor) zip(r io.Reader) error {
 	// zip needs random access to the central directory, so spool the
 	// archive (bounded) first.
-	sp, err := spool(r, MaxArchiveSize)
+	sp, err := spool(r, x.lim.MaxArchiveSize)
 	if errors.Is(err, errTooLarge) {
-		return inputErrorf("archive is larger than %d bytes", MaxArchiveSize)
+		return inputErrorf("archive is larger than %d bytes", x.lim.MaxArchiveSize)
 	}
 	if err != nil {
 		return fmt.Errorf("sites: read archive: %w", err)
 	}
 	defer sp.close()
-	if err := checkZipDirectory(sp.readerAt(), sp.size); err != nil {
+	if err := x.checkZipDirectory(sp.readerAt(), sp.size); err != nil {
 		return err
 	}
 	zr, err := zip.NewReader(sp.readerAt(), sp.size)
@@ -231,8 +235,8 @@ func (x *extractor) zip(r io.Reader) error {
 }
 
 func (x *extractor) zipFile(f *zip.File) error {
-	declared := int64(MaxFileSize + 1)
-	if f.UncompressedSize64 <= uint64(MaxFileSize) {
+	declared := x.lim.MaxFileSize + 1
+	if f.UncompressedSize64 <= uint64(x.lim.MaxFileSize) {
 		declared = int64(f.UncompressedSize64)
 	}
 	rc, err := f.Open()
@@ -269,16 +273,16 @@ const (
 // the low 16 bits of the end record's entry count with what it read: a
 // small archive could declare few entries and hold millions of headers. So
 // the declared count (from the end record, or the zip64 end record) must
-// not exceed MaxArchiveEntries, nor may the headers actually present at
+// not exceed MAX_ARCHIVE_ENTRIES, nor may the headers actually present at
 // either offset archive/zip may start reading at. Locating the end record
 // mirrors archive/zip's readDirectoryEnd. Nothing is allocated per entry.
-func checkZipDirectory(r io.ReaderAt, size int64) error {
+func (x *extractor) checkZipDirectory(r io.ReaderAt, size int64) error {
 	records, dirSize, dirOffset, endOffset, err := readZipEnd(r, size)
 	if err != nil {
 		return inputErrorf("invalid zip archive: %v", err)
 	}
-	if records > MaxArchiveEntries {
-		return tooManyEntries()
+	if records > uint64(x.lim.MaxArchiveEntries) {
+		return x.tooManyEntries()
 	}
 	if records*zipCentralLen > dirSize {
 		return inputErrorf("invalid zip archive: central directory too small for %d entries", records)
@@ -287,8 +291,8 @@ func checkZipDirectory(r io.ReaderAt, size int64) error {
 	// (data prepended to the archive shifts it) or, when a header parses
 	// there, from the declared offset itself.
 	for _, off := range []int64{endOffset - int64(dirSize), int64(dirOffset)} {
-		if off >= 0 && off < size && zipHeaders(r, size, off) > MaxArchiveEntries {
-			return tooManyEntries()
+		if off >= 0 && off < size && zipHeaders(r, size, off, x.lim.MaxArchiveEntries) > x.lim.MaxArchiveEntries {
+			return x.tooManyEntries()
 		}
 	}
 	return nil
@@ -362,13 +366,13 @@ func zipEndSignature(b []byte) int {
 }
 
 // zipHeaders counts the central directory headers starting at off, as
-// archive/zip reads them, stopping past MaxArchiveEntries.
-func zipHeaders(r io.ReaderAt, size, off int64) int {
+// archive/zip reads them, stopping past limit.
+func zipHeaders(r io.ReaderAt, size, off int64, limit int) int {
 	br := bufio.NewReader(io.NewSectionReader(r, off, size-off))
 	le := binary.LittleEndian
 	var h [zipCentralLen]byte
 	n := 0
-	for n <= MaxArchiveEntries {
+	for n <= limit {
 		if _, err := io.ReadFull(br, h[:]); err != nil || le.Uint32(h[:]) != zipCentralSig {
 			break
 		}

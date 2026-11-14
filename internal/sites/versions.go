@@ -129,7 +129,7 @@ func (s *Service) OpenBlob(ctx context.Context, siteID, sha256Hex string) (*stor
 	if err != nil || len(sum) != 32 || !siteid.Valid(siteID) {
 		return nil, ErrNotFound
 	}
-	obj, err := s.store.Get(ctx, blobKey(siteID, sum))
+	obj, err := s.store.Get(ctx, BlobKey(siteID, sum))
 	if errors.Is(err, storage.ErrNotFound) {
 		return nil, ErrNotFound
 	}

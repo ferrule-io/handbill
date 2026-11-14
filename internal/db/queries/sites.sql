@@ -117,9 +117,19 @@ WHERE version_id = @version_id AND path = ANY(@paths::text[])
 ORDER BY array_position(@paths::text[], path)
 LIMIT 1;
 
--- name: SiteBlobExists :one
-SELECT EXISTS (SELECT 1 FROM site_blobs WHERE site_id = @site_id AND sha256 = @sha256);
+-- TouchSiteBlob marks an existing blob as just staged, keeping blob GC
+-- (maintenance.sql) away from it; 0 rows means the site lacks the blob.
+-- name: TouchSiteBlob :execrows
+UPDATE site_blobs SET staged_at = now() WHERE site_id = @site_id AND sha256 = @sha256;
 
 -- name: CreateSiteBlob :exec
 INSERT INTO site_blobs (site_id, sha256, size) VALUES (@site_id, @sha256, @size)
-ON CONFLICT (site_id, sha256) DO NOTHING;
+ON CONFLICT (site_id, sha256) DO UPDATE SET staged_at = now();
+
+-- name: DeploymentTotals :one
+SELECT count(*)::int AS files, coalesce(sum(size), 0)::bigint AS bytes
+FROM deployment_files WHERE deployment_id = @deployment_id AND NOT deleted;
+
+-- name: VersionTotals :one
+SELECT count(*)::int AS files, coalesce(sum(size), 0)::bigint AS bytes
+FROM version_files WHERE version_id = @version_id;
