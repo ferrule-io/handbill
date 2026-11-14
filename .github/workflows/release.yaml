@@ -70,6 +70,8 @@ jobs:
           push: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
           # handbill --version, the startup log, and the MCP server version.
           build-args: |
             VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('0.0.0-{0}', github.sha) }}
@@ -85,16 +87,6 @@ jobs:
           subject-name: ghcr.io/ferrule-io/handbill
           subject-digest: ${{ steps.build-push.outputs.digest }}
           push-to-registry: true
-
-      - name: Generate SBOM attestation
-        # v2.4.0
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
-        with:
-          subject-name: ghcr.io/ferrule-io/handbill
-          subject-digest: ${{ steps.build-push.outputs.digest }}
-          push-to-registry: true
-
   chart:
     name: Package and push Helm chart
     needs: image
