@@ -18,6 +18,28 @@ services:
       timeout: 3s
       retries: 30
 
+  # Go tests (internal/db/dbtest) create, migrate, and drop a database per
+  # test. On the dev instance that churn (WAL and checkpoints for every
+  # CREATE/DROP DATABASE) starved the server under test: Playwright timed
+  # out while `go test` ran, and dbtest's own drops timed out under load.
+  # A separate throwaway instance without durability keeps them apart.
+  postgres-test:
+    image: postgres:17
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off", "-c", "max_connections=300"]
+    environment:
+      POSTGRES_USER: handbill
+      POSTGRES_PASSWORD: handbill
+      POSTGRES_DB: handbill
+    ports:
+      - "127.0.0.1:55433:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U handbill -d handbill"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   minio:
     image: cgr.dev/chainguard/minio:latest
     profiles:

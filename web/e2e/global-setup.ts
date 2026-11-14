@@ -23,7 +23,12 @@ export default async function globalSetup(config: FullConfig) {
   const { probe } = seed({ users: [], probe: true })
   if (!probe) throw new Error("e2eseed returned no probe")
   const origin = siteOrigin(baseURL, probe.site)
-  const share = await fetch(`${origin}/_auth/share/${probe.token}`, { redirect: "manual" })
+  // What the /_auth/share#token=… opener page does: POST the token.
+  const share = await fetch(`${origin}/_auth/share`, {
+    method: "POST",
+    body: new URLSearchParams({ token: probe.token }),
+    redirect: "manual",
+  })
   const cookie = share.headers
     .getSetCookie()
     .map((c) => c.split(";")[0])

@@ -27,7 +27,7 @@ run: web build db-up
 	./bin/handbill
 
 db-up:
-	docker compose up -d --wait postgres
+	docker compose up -d --wait postgres postgres-test
 
 db-down:
 	docker compose down

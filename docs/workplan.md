@@ -709,3 +709,30 @@ multi-arch image and chart release workflows.
 Also: rate limits on `/oauth/register`, `/oauth/authorize`, and
 `/oauth/token`; GC of expired OAuth authorization requests, codes, and
 tokens, and of DCR clients without grants (W5 left both here).
+
+### W9b Operational hardening — done
+
+- Limits: `config.Limits` (`MAX_FILE_SIZE`, `MAX_SITE_SIZE`,
+  `MAX_SITE_FILES`, `MAX_ARCHIVE_SIZE`, `MAX_ARCHIVE_ENTRIES`, `MAX_MCP_BODY`,
+  `MAX_JSON_BODY`) replace the `internal/sites/limits.go` constants;
+  `sites.Service.Limits()`. Version totals are enforced when staging and at
+  finalize. `appapi.Handle` caps bodies with `http.MaxBytesReader`.
+- `internal/ratelimit` (route table `rules.go`, `TRUSTED_PROXIES`),
+  `internal/metrics` (`METRICS_ADDR`, separate listener),
+  `internal/httpserver` (timeouts, per-route deadlines, graceful shutdown),
+  `internal/maintenance` (advisory-locked cleanup and blob GC),
+  `internal/version`. Middleware modules: `module_httpserver.go`,
+  `module_metrics.go`, `module_ratelimit.go`; they rely on init order after
+  `module_auth.go` (checked by `cmd/handbill/main_test.go`).
+- Migration `20261113233000_maintenance.sql`: `site_blobs.created_at` is now
+  `staged_at` (refreshed on reuse), `storage_deletions`, expiry indexes.
+- E2E: Playwright `globalSetup` builds the seeders once and runs them as
+  binaries (`go run` went through the mise shim, which replaced the
+  server's `DATABASE_URL`/`STORAGE_*` with `mise.toml`'s), then proves they
+  share the server's database and storage through a public-link probe site.
+- Flakes, root cause: `go test` created, migrated, and dropped a database
+  per test on the same PostgreSQL the dev/e2e server used. Under that churn
+  the server's plain queries took seconds (`/app-api/me` 5.8 s observed),
+  so Playwright's 5 s expectations in `auth.spec.ts` failed, and dbtest's
+  drops hit their timeout. Tests now use compose's `postgres-test`
+  (port 55433, tmpfs, fsync off); `make db-up` starts both.

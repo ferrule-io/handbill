@@ -434,13 +434,19 @@ the one-shot form of the same pipeline.
   directory entries are skipped. When every file shares one top-level
   directory (`site/index.html`, `site/css/app.css`, as `tar czf site.tar.gz
   site/` produces), that directory is stripped; otherwise paths are kept as
-  they are. Limits (`internal/sites/limits.go`): 10 000 entries, 64 MiB per
-  file, 512 MiB uncompressed per archive (also the cap on compressed bytes
-  read). A zip's entry count is checked before its central directory is
-  read, both as declared (zip64 included) and as headers present, so a
-  directory holding more headers than it declares is rejected. A tar.gz's
-  decompressed stream, tar metadata (PAX, GNU long names) included, is
-  capped at 512 MiB plus 4 KiB per allowed entry.
+  they are. Limits (configurable, see [Configuration](#configuration)):
+  `MAX_ARCHIVE_ENTRIES` (10 000) entries, `MAX_FILE_SIZE` (64 MiB) per
+  file, `MAX_ARCHIVE_SIZE` (512 MiB) uncompressed per archive (also the cap
+  on compressed bytes read). A zip's entry count is checked before its
+  central directory is read, both as declared (zip64 included) and as
+  headers present, so a directory holding more headers than it declares is
+  rejected. A tar.gz's decompressed stream, tar metadata (PAX, GNU long
+  names) included, is capped at `MAX_ARCHIVE_SIZE` plus 4 KiB per allowed
+  entry.
+- A version holds at most `MAX_SITE_FILES` (10 000) files of at most
+  `MAX_SITE_SIZE` (1 GiB) in total. Both are checked when files are staged
+  (an open deployment cannot grow past them) and at finalize against the
+  resulting version (a merge counts the files it keeps).
 
 ## MCP authorization
 
@@ -457,8 +463,9 @@ the one-shot form of the same pipeline.
   favor of CIMD, is off by default. With `OAUTH_DCR_ENABLED=true`,
   `/oauth/register` is served and advertised as `registration_endpoint` in AS
   metadata. Registration is unauthenticated; the consent screen labels DCR
-  clients as unverified. Rate limiting it (and `/oauth/authorize`, which
-  triggers CIMD fetches, and `/oauth/token`) is W9's. Turning DCR off also
+  clients as unverified. `/oauth/register` is rate limited strictly, and
+  `/oauth/authorize` (which triggers CIMD fetches), `/oauth/token`, and
+  `/oauth/revoke` per client address ([Rate limits](#rate-limits)). Turning DCR off also
   stops clients registered earlier: authorize, token, and their access
   tokens at `/mcp` are refused.
 - Redirect URIs, for CIMD and DCR alike, are absolute, without fragment or
@@ -580,11 +587,31 @@ sets exactly these.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | empty | Google sign-in; set both or neither (disabled when unset) |
 | `OAUTH_DCR_ENABLED` | `false` | Serve `/oauth/register` (Dynamic Client Registration) |
 | `INVITE_TTL` | `336h` | Lifetime of invites and ownership transfers (Go duration) |
+| `MAX_FILE_SIZE` | `64MiB` | Largest file, direct or in an archive |
+| `MAX_SITE_SIZE` | `1GiB` | Total bytes of one version's files |
+| `MAX_SITE_FILES` | `10000` | Files in one version |
+| `MAX_ARCHIVE_SIZE` | `512MiB` | One archive upload, compressed and uncompressed |
+| `MAX_ARCHIVE_ENTRIES` | `10000` | Entries (files and directories) in one archive |
+| `MAX_MCP_BODY` | `16MiB` | One `/mcp` request body |
+| `MAX_JSON_BODY` | `1MiB` | One `/app-api/` request body |
+| `RATE_LIMIT_ENABLED` | `true` | Per-replica rate limits ([Rate limits](#rate-limits)) |
+| `TRUSTED_PROXIES` | empty | Comma-separated CIDRs (or addresses) allowed to set `X-Forwarded-For`; empty: the client is the TCP peer |
+| `METRICS_ADDR` | empty | Serve Prometheus `/metrics` on this separate listener (e.g. `:9090`); disabled when empty; must differ from `LISTEN_ADDR` |
+| `MAINTENANCE_INTERVAL` | `15m` | How often one replica runs [maintenance](#maintenance) |
+| `BLOB_GC_GRACE` | `24h` | Minimum age of an unreferenced blob before GC deletes it (at least `1h`) |
+| `SHUTDOWN_TIMEOUT` | `25s` | Drain time for in-flight requests after SIGTERM |
 
 - S3 credentials come from the AWS SDK default chain (environment, shared
   config, web identity / IRSA, instance role); GCS credentials from
   Application Default Credentials (including workload identity).
 - Booleans accept Go's `strconv.ParseBool` forms (`true`, `false`, `1`, `0`).
+- Sizes are bytes, optionally with a binary suffix: `B`, `KiB`, `MiB`, `GiB`,
+  `TiB` (`64MiB`). Counts are positive integers. `MAX_FILE_SIZE` must not
+  exceed `MAX_SITE_SIZE` or `MAX_ARCHIVE_SIZE`.
+- `handbill --version` prints the version and commit set at build time
+  (`-ldflags -X …/internal/version.Version=… -X …Commit=…`; the Makefile
+  uses `git describe`, the Dockerfile the `VERSION`/`COMMIT` build args). The
+  startup log and the MCP server's `serverInfo.version` report the same.
 
 Runtime contract:
 
@@ -604,10 +631,91 @@ Runtime contract:
   other host gets 404.
 - Logs are JSON lines on stdout; query strings and `/_auth/` path tails are
   never logged.
+- HTTP: headers within 10 s, request bodies within 60 s, handlers and
+  responses within 2 min, idle keep-alives 2 min, headers up to 1 MiB (kept
+  at Go's default so a site's parent-domain cookies cannot lock viewers out).
+  Archive uploads get 30 min to read and respond, `POST /mcp` 5 min, and
+  site-host responses 30 min to stream (`http.ResponseController`
+  deadlines, `internal/httpserver`). On SIGTERM the listener closes and
+  in-flight requests get `SHUTDOWN_TIMEOUT` before connections are cut.
 
 Local development (`mise.toml` `[env]`, `compose.yaml`): the app runs on
 `http://dash.localhost:8080`, sites on `http://<id>.sites.localhost:8080`
 (browsers resolve `*.localhost` to loopback), and PostgreSQL on host port 55432.
+
+## Operations
+
+### Rate limits
+
+`internal/ratelimit` keeps in-memory token buckets per replica (N replicas
+allow up to N times each limit; a restart resets them). Its route table
+(`rules.go`) names mux patterns and is applied by `r.UseApp`/`r.UseSites`
+middleware; a test checks every pattern is a registered route. Buckets are
+keyed by client address (IPv6 by /64), by signed-in user where noted, or by
+bearer token for `/mcp` (plus a per-address cap, since tokens cost nothing
+to invent). The client address is the TCP peer unless the peer is in
+`TRUSTED_PROXIES`; then `X-Forwarded-For` is read from the right, skipping
+trusted proxies, and entries a client wrote itself are never believed.
+
+| Rule | Routes | Key | Burst, refill |
+|---|---|---|---|
+| signup | passkey sign-up begin/finish | address | 30, 20/min |
+| signin | passkey sign-in begin/finish | address | 60, 60/min |
+| recovery | recovery-code sign-in | address | 10, 5/min |
+| google | Google start and callback | address | 30, 30/min |
+| email_verification | resend verification | user | 5, 6/h |
+| email_verify | verify link | address | 30, 30/min |
+| oauth_register | `/oauth/register` | address | 10, 30/h |
+| oauth_authorize, oauth_token, oauth_revoke | `/oauth/*` | address | 30–60, 60/min |
+| invite_send | invite, start transfer | user | 30, 2/min |
+| invite_lookup | invite lookup | address | 20, 30/min |
+| invite_accept | invite accept | user | 20, 30/min |
+| mcp | `/mcp` | bearer token; address | 120, 300/min; 300, 1200/min |
+| archive_upload | `PUT /api/deployments/{id}/archive` | address | 10, 30/min |
+| sites | every site-host request | address | 400, 1200/min |
+
+A refused request gets 429 with `Retry-After` (seconds): JSON in the
+`/app-api/` shape (`rate_limited`) or the OAuth shape (`/oauth/` POSTs),
+plain text elsewhere.
+
+### Metrics
+
+With `METRICS_ADDR` set, `GET /metrics` is served on that listener only:
+`handbill_http_requests_total{host,route,code}` and
+`handbill_http_request_duration_seconds{host,route}` (host is `app` or
+`sites`, route the mux pattern), `handbill_mcp_tool_calls_total{tool,outcome}`,
+`handbill_publishes_total{outcome}`, `handbill_rate_limited_total{rule}`,
+`handbill_maintenance_runs_total`, `handbill_maintenance_deleted_total{job}`,
+`handbill_db_pool_*`, and Go/process metrics.
+
+### Maintenance
+
+One goroutine per replica wakes every `MAINTENANCE_INTERVAL`; a session
+advisory lock lets one replica work at a time (`internal/maintenance`). It
+deletes:
+
+- sessions, site tickets, sign-in flows, email verification links, OAuth
+  authorization requests, codes, access and refresh tokens, 1 h past their
+  expiry (consumed codes and rotated refresh tokens stay until then for
+  replay detection);
+- OAuth clients nobody approved (no grant, no pending request) after 24 h:
+  DCR registrations, and CIMD documents whose cache expired;
+- invites and ownership transfers never accepted (pending or revoked) 30 days
+  past expiry, so their links say "expired" meanwhile. Accepted ones are
+  kept, as the record of how a member got a role; they go with the site;
+- deployments left open for 24 h are abandoned; abandoned deployments are
+  deleted after 7 days;
+- storage prefixes of deleted sites whose cleanup failed (queued in
+  `storage_deletions` in the delete's transaction);
+- blobs (`site_blobs` rows and objects) no version or open deployment of
+  their site uses, last staged more than `BLOB_GC_GRACE` ago. Staging a blob
+  the site already has refreshes its `staged_at`; GC deletes the object
+  while holding the row's lock and commits only afterwards, so an upload
+  reusing the blob either refreshed it first or waits and stores it again.
+
+Backups: back up the database before the storage and never let maintenance
+run against a restored database before its storage is restored (chart
+README, "Backup and Restore").
 
 ## Deployment
 
@@ -628,6 +736,8 @@ distroless base, running as non-root.
 | `smtp.*` | Optional; notifications are disabled when unset. |
 | `google.*` | OAuth client ID and secret (from an existing Secret). |
 | `oauth.dcrEnabled` (default `false`) | Maps to `OAUTH_DCR_ENABLED`. |
+| `limits.*`, `rateLimit.*`, `maintenance.*`, `shutdownTimeout` | Map to the `MAX_*`, `RATE_LIMIT_ENABLED`/`TRUSTED_PROXIES`, `MAINTENANCE_INTERVAL`/`BLOB_GC_GRACE`, and `SHUTDOWN_TIMEOUT` variables. `preStopSleepSeconds` (5) and `terminationGracePeriodSeconds` (40) frame the drain. |
+| `metrics.enabled` (default `false`) | Sets `METRICS_ADDR` to `:<metrics.port>` (9090) and adds a ClusterIP `<release>-metrics` Service; `metrics.serviceMonitor.enabled` adds a Prometheus Operator ServiceMonitor. |
 
 - Without the chart's Ingress, the operator routes both hostnames to the
   Service (their own Ingress, Gateway API, or a tunnel).
