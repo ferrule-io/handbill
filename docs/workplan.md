@@ -730,9 +730,10 @@ tokens, and of DCR clients without grants (W5 left both here).
   binaries (`go run` went through the mise shim, which replaced the
   server's `DATABASE_URL`/`STORAGE_*` with `mise.toml`'s), then proves they
   share the server's database and storage through a public-link probe site.
-- Flakes, root cause: `go test` created, migrated, and dropped a database
-  per test on the same PostgreSQL the dev/e2e server used. Under that churn
-  the server's plain queries took seconds (`/app-api/me` 5.8 s observed),
-  so Playwright's 5 s expectations in `auth.spec.ts` failed, and dbtest's
-  drops hit their timeout. Tests now use compose's `postgres-test`
-  (port 55433, tmpfs, fsync off); `make db-up` starts both.
+- Flakes (open): `auth.spec.ts` fails while `go test -race ./...` runs on
+  the same machine. Server requests then take seconds (`/app-api/me` 5.8 s,
+  recovery-code issue 2.6 s observed) against Playwright's 5 s
+  expectations. Moving Go tests to compose's `postgres-test` (port 55433,
+  tmpfs, fsync off; `make db-up` starts both) keeps their database churn
+  off the dev database, but the failures remain under CPU load (1–3 of 47
+  per run), so the cause is not only the shared database. Not fixed.
